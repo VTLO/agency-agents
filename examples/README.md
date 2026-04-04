@@ -39,6 +39,25 @@ These examples answer the question: *"What does it actually look like when the f
 
 **Key takeaway:** All 8 agents ran in parallel and produced coherent, cross-referencing plans without coordination overhead. The output demonstrates the agency's ability to go from "find an opportunity" to "here's the full blueprint" in a single session.
 
+### [workflow-multi-tool.md](./workflow-multi-tool.md)
+
+**What:** A step-by-step feature development workflow with exact activation syntax for Claude Code, GitHub Copilot, and Gemini CLI.
+
+**The scenario:** Adding a user notification preferences page to an existing web app — from product validation through UX research, API design, frontend build, and production readiness gate.
+
+**Agents used:**
+| Agent | Role |
+|-------|------|
+| Product Manager | Feature brief and acceptance criteria |
+| UX Researcher | User mental models and design patterns |
+| Backend Architect | API endpoints and database schema |
+| Frontend Developer | React + TypeScript UI with optimistic updates |
+| Reality Checker | GO / NO-GO production readiness decision |
+
+**Key takeaway:** The prompts are identical across all three tools — only the activation line changes. Parallel phases (UX research + API design) cut wall-clock time in half before the build step.
+
+---
+
 ## Adding New Examples
 
 If you run an interesting multi-agent exercise, consider adding it here. Good examples show:
