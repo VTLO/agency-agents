@@ -9,6 +9,7 @@ supported agentic coding tools.
 - **[GitHub Copilot](#github-copilot)** — `.md` agents, use the repo directly
 - **[Antigravity](#antigravity)** — `SKILL.md` per agent in `antigravity/`
 - **[Gemini CLI](#gemini-cli)** — extension + `SKILL.md` files in `gemini-cli/`
+- **[Gemma4](#gemma4)** — `SKILL.md` per agent in `gemma4/`
 - **[OpenCode](#opencode)** — `.md` agent files in `opencode/`
 - **[OpenClaw](#openclaw)** — `SOUL.md` + `AGENTS.md` + `IDENTITY.md` workspaces
 - **[Cursor](#cursor)** — `.mdc` rule files in `cursor/`
@@ -101,6 +102,20 @@ Because the Gemini manifest and skill folders are generated artifacts, run
 ```
 
 See [gemini-cli/README.md](gemini-cli/README.md) for details.
+
+---
+
+## Gemma4
+
+Skills are installed to `~/.gemma/skills/`. Each agent becomes a separate
+skill file ready for local Gemma4 use.
+
+```bash
+./scripts/convert.sh --tool gemma4
+./scripts/install.sh --tool gemma4
+```
+
+See [gemma4/README.md](gemma4/README.md) for details.
 
 ---
 
