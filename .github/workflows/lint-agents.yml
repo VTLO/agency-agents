@@ -3,18 +3,39 @@ name: Lint Agent Files
 on:
   pull_request:
     paths:
+      - 'academic/**'
       - 'design/**'
       - 'engineering/**'
       - 'game-development/**'
       - 'marketing/**'
       - 'paid-media/**'
-      - 'sales/**'
       - 'product/**'
       - 'project-management/**'
-      - 'testing/**'
-      - 'support/**'
+      - 'sales/**'
       - 'spatial-computing/**'
       - 'specialized/**'
+      - 'support/**'
+      - 'testing/**'
+      - 'scripts/lint-agents.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - 'academic/**'
+      - 'design/**'
+      - 'engineering/**'
+      - 'game-development/**'
+      - 'marketing/**'
+      - 'paid-media/**'
+      - 'product/**'
+      - 'project-management/**'
+      - 'sales/**'
+      - 'spatial-computing/**'
+      - 'specialized/**'
+      - 'support/**'
+      - 'testing/**'
+      - 'scripts/lint-agents.sh'
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -25,13 +46,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed agent files
+      - name: Get changed agent files (PR)
         id: changed
+        if: github.event_name == 'pull_request'
         run: |
           FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
-            'design/**/*.md' 'engineering/**/*.md' 'game-development/**/*.md' 'marketing/**/*.md' 'paid-media/**/*.md' 'sales/**/*.md' 'product/**/*.md' \
-            'project-management/**/*.md' 'testing/**/*.md' 'support/**/*.md' \
-            'spatial-computing/**/*.md' 'specialized/**/*.md')
+            'academic/**/*.md' \
+            'design/**/*.md' \
+            'engineering/**/*.md' \
+            'game-development/**/*.md' \
+            'marketing/**/*.md' \
+            'paid-media/**/*.md' \
+            'product/**/*.md' \
+            'project-management/**/*.md' \
+            'sales/**/*.md' \
+            'spatial-computing/**/*.md' \
+            'specialized/**/*.md' \
+            'support/**/*.md' \
+            'testing/**/*.md')
           {
             echo "files<<ENDOFLIST"
             echo "$FILES"
@@ -44,10 +76,24 @@ jobs:
             echo "$FILES"
           fi
 
-      - name: Run agent linter
-        if: steps.changed.outputs.files != ''
+      - name: Run agent linter (PR – changed files only)
+        if: github.event_name == 'pull_request' && steps.changed.outputs.files != ''
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           chmod +x scripts/lint-agents.sh
+          # shellcheck disable=SC2086
           ./scripts/lint-agents.sh $CHANGED_FILES
+
+      - name: Run agent linter (push / manual – all files)
+        if: github.event_name != 'pull_request'
+        run: |
+          chmod +x scripts/lint-agents.sh
+          ./scripts/lint-agents.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Lint Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trigger: \`${{ github.event_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ref: \`${{ github.ref }}\`" >> "$GITHUB_STEP_SUMMARY"
