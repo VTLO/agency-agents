@@ -78,3 +78,7 @@ integrations/qwen/agents/
 integrations/kimi/*/
 !integrations/openclaw/README.md
 !integrations/kimi/README.md
+
+# M3LVin runtime data and secrets
+m3lvin-data/
+m3lvin/.env
