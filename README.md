@@ -63,6 +63,10 @@ Browse the agents below and copy/adapt the ones you need!
 
 See the [Multi-Tool Integrations](#-multi-tool-integrations) section below for full details.
 
+### Option 4: Run the agency from WhatsApp with M3LVin
+
+[`m3lvin/`](m3lvin/README.md) is a French-speaking WhatsApp orchestrator: the team describes a need, M3LVin proposes a production plan, a human approves it, and token-lean "lite" versions of these agents produce the deliverables.
+
 ---
 
 ## 🎨 The Agency Roster
