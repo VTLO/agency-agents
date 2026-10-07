@@ -22,9 +22,23 @@ PRICES: dict[str, tuple[float, float]] = {
 EFFORT_MODELS = {"claude-sonnet-5-5", "claude-opus-5-5"}
 
 
-def _env_list(name: str) -> set[str]:
-    raw = os.environ.get(name, "")
-    return {x.strip().lstrip("+") for x in raw.split(",") if x.strip()}
+@dataclass(frozen=True)
+class User:
+    name: str
+    role: str  # "approver" | "member"
+    code: str  # access code (also usable as a Bearer token for the HTTP API)
+
+
+def parse_users(raw: str) -> dict[str, User]:
+    """M3_USERS="alice:approver:code-a,bob:member:code-b" -> {name: User}."""
+    users: dict[str, User] = {}
+    for item in raw.split(","):
+        parts = [p.strip() for p in item.split(":", 2)]
+        if len(parts) != 3 or not all(parts):
+            continue
+        name, role, code = parts
+        users[name.lower()] = User(name.lower(), "approver" if role.lower().startswith("approv") else "member", code)
+    return users
 
 
 @dataclass(frozen=True)
@@ -76,27 +90,33 @@ class Settings:
     parallelism: int = int(os.environ.get("M3_PARALLELISM", "3"))
 
     # --- governance ---------------------------------------------------------
-    team: set[str] = field(default_factory=lambda: _env_list("M3_TEAM"))
-    approvers: set[str] = field(default_factory=lambda: _env_list("M3_APPROVERS"))
+    # Empty M3_USERS = open single-team mode (local use): anyone is member and approver.
+    users: dict[str, User] = field(default_factory=lambda: parse_users(os.environ.get("M3_USERS", "")))
     required_approvals: int = int(os.environ.get("M3_REQUIRED_APPROVALS", "1"))
     allow_self_approval: bool = os.environ.get("M3_ALLOW_SELF_APPROVAL", "1") == "1"
-
-    # --- WhatsApp Cloud API -------------------------------------------------
-    wa_token: str = os.environ.get("WHATSAPP_TOKEN", "")
-    wa_phone_id: str = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
-    wa_verify_token: str = os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
-    wa_app_secret: str = os.environ.get("WHATSAPP_APP_SECRET", "")
-    wa_api_version: str = os.environ.get("WHATSAPP_API_VERSION", "v21.0")
+    secret: str = os.environ.get("M3_SECRET", "")  # signs session cookies; generated if empty
 
     def tier(self, name: str) -> Tier:
         return self.tiers.get(name, self.tiers["S"])
 
-    def is_member(self, phone: str) -> bool:
-        return not self.team or phone in self.team or phone in self.approvers
+    @property
+    def open_mode(self) -> bool:
+        return not self.users
 
-    def is_approver(self, phone: str) -> bool:
-        # No approver list configured -> any team member can approve.
-        return phone in self.approvers if self.approvers else self.is_member(phone)
+    def is_member(self, user: str) -> bool:
+        return self.open_mode or user in self.users
+
+    def is_approver(self, user: str) -> bool:
+        if self.open_mode:
+            return True
+        u = self.users.get(user)
+        if not u:
+            return False
+        # No approver declared at all -> every member may approve.
+        return u.role == "approver" or not any(x.role == "approver" for x in self.users.values())
+
+    def approvers(self) -> set[str]:
+        return {u.name for u in self.users.values() if u.role == "approver"}
 
 
 def cost_usd(model: str, inp: int, out: int, cache_read: int = 0, cache_write: int = 0) -> float:

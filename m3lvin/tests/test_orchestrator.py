@@ -2,9 +2,11 @@ import asyncio
 import copy
 import json
 
+from m3lvin.config import parse_users
+
 from .conftest import BRIEF, PLAN
 
-OWNER, BOSS, STRANGER = "33611111111", "33622222222", "33699999999"
+OWNER, BOSS, STRANGER = "alice", "boss", "mallory"
 
 
 async def _drain(bot):
@@ -85,13 +87,13 @@ def test_duplicate_webhook_is_ignored(make_bot):
 
 
 def test_unknown_sender_rejected_without_tokens(make_bot):
-    bot, llm, out = make_bot(team={OWNER})
+    bot, llm, out = make_bot(users=parse_users("alice:member:a"))
     asyncio.run(bot.handle(STRANGER, "VALIDER P-AAAA v1", "x"))
     assert llm.calls == [] and "pas autorisé" in out.texts(STRANGER)[0]
 
 
 def test_approval_gate(make_bot):
-    bot, llm, out = make_bot(shortlist_size=500, team={OWNER}, approvers={BOSS}, allow_self_approval=False)
+    bot, llm, out = make_bot(shortlist_size=500, users=parse_users("alice:member:a,boss:approver:b"), allow_self_approval=False)
 
     async def scenario():
         _to_plan(llm)
