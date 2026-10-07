@@ -1,4 +1,4 @@
-"""SQLite persistence: conversations, frozen plan versions, approvals, runs, ledger, audit."""
+"""SQLite persistence: conversations, message history, frozen plan versions, approvals, runs, ledger, audit."""
 
 from __future__ import annotations
 
@@ -11,22 +11,25 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inbound  (msg_id TEXT PRIMARY KEY, ts REAL);
-CREATE TABLE IF NOT EXISTS convs    (phone TEXT PRIMARY KEY, state TEXT, brief TEXT, plan_id TEXT,
+CREATE TABLE IF NOT EXISTS convs    (user TEXT PRIMARY KEY, state TEXT, brief TEXT, plan_id TEXT,
                                      history TEXT, updated REAL);
 CREATE TABLE IF NOT EXISTS plans    (id TEXT, version INTEGER, owner TEXT, status TEXT, body TEXT,
                                      hash TEXT, est_tokens INTEGER, created REAL, note TEXT,
                                      PRIMARY KEY (id, version));
-CREATE TABLE IF NOT EXISTS approvals(plan_id TEXT, version INTEGER, phone TEXT, ts REAL,
-                                     PRIMARY KEY (plan_id, version, phone));
+CREATE TABLE IF NOT EXISTS approvals(plan_id TEXT, version INTEGER, user TEXT, ts REAL,
+                                     PRIMARY KEY (plan_id, version, user));
 CREATE TABLE IF NOT EXISTS steps    (plan_id TEXT, version INTEGER, step_id TEXT, status TEXT,
                                      digest TEXT, path TEXT, tokens INTEGER, cost REAL,
                                      PRIMARY KEY (plan_id, version, step_id));
 CREATE TABLE IF NOT EXISTS ledger   (ts REAL, plan_id TEXT, purpose TEXT, model TEXT, inp INTEGER,
                                      outp INTEGER, cache_r INTEGER, cache_w INTEGER, cost REAL);
 CREATE TABLE IF NOT EXISTS audit    (ts REAL, actor TEXT, event TEXT, data TEXT);
+CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, author TEXT,
+                                     kind TEXT, body TEXT, meta TEXT, ts REAL);
+CREATE INDEX IF NOT EXISTS messages_user ON messages (user, id);
 """
 
-_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity on phones
+_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity when typed by hand
 
 
 class Store:
@@ -43,7 +46,7 @@ class Store:
         with self.lock:
             return self.db.execute(sql, args)
 
-    # --- idempotency (WhatsApp re-delivers webhooks) ------------------------
+    # --- idempotency (clients retry: each message carries a client-side id) ------------------------
     def seen(self, msg_id: str) -> bool:
         try:
             self._x("INSERT INTO inbound VALUES (?,?)", (msg_id, time.time()))
@@ -52,12 +55,12 @@ class Store:
             return True
 
     # --- conversations ------------------------------------------------------
-    def conv(self, phone: str) -> dict:
-        row = self._x("SELECT * FROM convs WHERE phone=?", (phone,)).fetchone()
+    def conv(self, user: str) -> dict:
+        row = self._x("SELECT * FROM convs WHERE user=?", (user,)).fetchone()
         if not row:
-            return {"phone": phone, "state": "cadrage", "brief": {}, "plan_id": None, "history": []}
+            return {"user": user, "state": "cadrage", "brief": {}, "plan_id": None, "history": []}
         return {
-            "phone": phone,
+            "user": user,
             "state": row["state"],
             "brief": json.loads(row["brief"] or "{}"),
             "plan_id": row["plan_id"],
@@ -67,7 +70,7 @@ class Store:
     def save_conv(self, c: dict) -> None:
         self._x(
             "INSERT OR REPLACE INTO convs VALUES (?,?,?,?,?,?)",
-            (c["phone"], c["state"], json.dumps(c["brief"], ensure_ascii=False), c["plan_id"],
+            (c["user"], c["state"], json.dumps(c["brief"], ensure_ascii=False), c["plan_id"],
              json.dumps(c["history"], ensure_ascii=False), time.time()),
         )
 
@@ -111,8 +114,8 @@ class Store:
         return [dict(r) for r in self._x(f"SELECT id, version, owner, status FROM plans WHERE status IN ({q})", statuses)]
 
     # --- approvals ----------------------------------------------------------
-    def approve(self, pid: str, version: int, phone: str) -> int:
-        self._x("INSERT OR IGNORE INTO approvals VALUES (?,?,?,?)", (pid, version, phone, time.time()))
+    def approve(self, pid: str, version: int, user: str) -> int:
+        self._x("INSERT OR IGNORE INTO approvals VALUES (?,?,?,?)", (pid, version, user, time.time()))
         return self._x("SELECT COUNT(*) FROM approvals WHERE plan_id=? AND version=?", (pid, version)).fetchone()[0]
 
     # --- step results -------------------------------------------------------
@@ -126,6 +129,27 @@ class Store:
     def steps(self, pid: str, version: int) -> dict[str, dict]:
         rows = self._x("SELECT * FROM steps WHERE plan_id=? AND version=?", (pid, version)).fetchall()
         return {r["step_id"]: {**dict(r), "digest": json.loads(r["digest"])} for r in rows}
+
+    # --- message history (what each user sees, on any device) ---------------
+    def add_message(self, user: str, author: str, kind: str, body: str, meta: dict | None = None) -> dict:
+        ts = time.time()
+        cur = self._x(
+            "INSERT INTO messages (user, author, kind, body, meta, ts) VALUES (?,?,?,?,?,?)",
+            (user, author, kind, body, json.dumps(meta or {}, ensure_ascii=False), ts),
+        )
+        return {"id": cur.lastrowid, "author": author, "kind": kind, "body": body, "meta": meta or {}, "ts": ts}
+
+    def messages(self, user: str, after: int = 0, limit: int = 200) -> list[dict]:
+        rows = self._x(
+            "SELECT * FROM (SELECT * FROM messages WHERE user=? AND id>? ORDER BY id DESC LIMIT ?) ORDER BY id",
+            (user, after, limit),
+        ).fetchall()
+        return [{"id": r["id"], "author": r["author"], "kind": r["kind"], "body": r["body"],
+                 "meta": json.loads(r["meta"]), "ts": r["ts"]} for r in rows]
+
+    def message(self, msg_id: int) -> dict | None:
+        r = self._x("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        return {**dict(r), "meta": json.loads(r["meta"])} if r else None
 
     # --- ledger & audit -----------------------------------------------------
     def log_usage(self, pid: str | None, purpose: str, r) -> None:

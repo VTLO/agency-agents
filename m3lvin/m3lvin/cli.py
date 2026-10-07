@@ -1,8 +1,8 @@
-"""Command line: serve the webhook, chat in the terminal, inspect lite skills.
+"""Command line: serve the web chat, chat in the terminal, inspect lite skills.
 
-    m3lvin serve                      # WhatsApp webhook server
-    m3lvin chat [--as +33600000000]   # terminal simulator (same brain, no WhatsApp)
-    m3lvin skills [query]             # compile skills / test the router
+    m3lvin serve                 # web chat + HTTP API (http://localhost:8080)
+    m3lvin chat [--as alice]     # terminal chat (same brain, same database)
+    m3lvin skills [query]        # compile skills / test the router
 """
 
 from __future__ import annotations
@@ -27,20 +27,20 @@ class ConsoleOutbox:
         print(f"\033[36m[M3LVin → {to}] 📎 {path}\033[0m")
 
 
-async def _chat(phone: str) -> None:
+async def _chat(user: str) -> None:
     from .app import build_bot
 
     s = Settings()
     bot = build_bot(s, ConsoleOutbox())
     await bot.recover()
-    print("M3LVin (simulateur terminal). Tapez AIDE, ou Ctrl-D pour quitter.")
+    print("M3LVin (terminal). Tapez AIDE, ou Ctrl-D pour quitter.")
     loop = asyncio.get_running_loop()
     while True:
         try:
             line = await loop.run_in_executor(None, input, "vous> ")
         except EOFError:
             break
-        await bot.handle(phone, line)
+        await bot.handle(user, line)
     if bot.tasks:
         print("…productions en cours, attente de la fin (Ctrl-C pour quitter)")
         await asyncio.gather(*bot.tasks)
@@ -64,7 +64,7 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("serve")
     c = sub.add_parser("chat")
-    c.add_argument("--as", dest="phone", default="33600000000")
+    c.add_argument("--as", dest="user", default="moi")
     k = sub.add_parser("skills")
     k.add_argument("query", nargs="?")
     args = p.parse_args()
@@ -74,7 +74,7 @@ def main() -> None:
         from .app import main as serve
         serve()
     elif args.cmd == "chat":
-        asyncio.run(_chat(args.phone))
+        asyncio.run(_chat(args.user))
     else:
         _skills(args.query)
 

@@ -1,0 +1,14 @@
+{
+  "name": "M3LVin",
+  "short_name": "M3LVin",
+  "description": "Chef d'orchestre de votre agence d'agents IA",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1013",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

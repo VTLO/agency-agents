@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir ./m3lvin && mkdir -p /data && chown nobody /data
 
 ENV M3_AGENCY_ROOT=/srv/agency \
     M3_DATA_DIR=/data \
-    PORT=8080
+    PORT=8080 \
+    HOST=0.0.0.0
 VOLUME ["/data"]
 EXPOSE 8080
 USER nobody
