@@ -1,6 +1,6 @@
-// Minimal service worker: makes M3LVin installable and keeps the app shell
+// Minimal service worker: makes J3anClaud3 installable and keeps the app shell
 // available offline. API calls and the live stream always go to the network.
-const SHELL = "m3lvin-shell-v1";
+const SHELL = "j3anclaud3-shell-v1";
 const ASSETS = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

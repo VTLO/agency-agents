@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from m3lvin.protocol import (
+from j3anclaud3.protocol import (
     PlanError, extract_json, parse_command, plan_budget, plan_hash, split_digest, topo_levels, validate_plan,
 )
 

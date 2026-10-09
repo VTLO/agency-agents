@@ -2,11 +2,10 @@ import asyncio
 import copy
 import json
 
-from m3lvin.config import parse_users
 
 from .conftest import BRIEF, PLAN
 
-OWNER, BOSS, STRANGER = "alice", "boss", "mallory"
+OWNER, BOSS = "alice", "boss"
 
 
 async def _drain(bot):
@@ -86,23 +85,23 @@ def test_duplicate_webhook_is_ignored(make_bot):
     assert len(llm.calls) == 1 and len(out.sent) == 1
 
 
-def test_unknown_sender_rejected_without_tokens(make_bot):
-    bot, llm, out = make_bot(users=parse_users("alice:member:a"))
-    asyncio.run(bot.handle(STRANGER, "VALIDER P-AAAA v1", "x"))
-    assert llm.calls == [] and "pas autorisé" in out.texts(STRANGER)[0]
+def test_anyone_can_talk_to_the_bot(make_bot):
+    bot, llm, out = make_bot()
+    asyncio.run(bot.handle("inconnu-42", "AIDE", "x"))
+    assert llm.calls == [] and "J3anClaud3" in out.texts("inconnu-42")[0]
 
 
-def test_approval_gate(make_bot):
-    bot, llm, out = make_bot(shortlist_size=500, users=parse_users("alice:member:a,boss:approver:b"), allow_self_approval=False)
+def test_approval_gate_four_eyes(make_bot):
+    bot, llm, out = make_bot(shortlist_size=500, allow_self_approval=False)
 
     async def scenario():
         _to_plan(llm)
         await bot.handle(OWNER, "landing", "1")
         pid = bot.store.conv(OWNER)["plan_id"]
-        assert any(f"VALIDER {pid} v1" in t for t in out.texts(BOSS))  # approver notified
 
-        await bot.handle(OWNER, f"VALIDER {pid} v1", "2")  # owner is not an approver
+        await bot.handle(OWNER, f"VALIDER {pid} v1", "2")  # the author cannot approve their own plan
         assert bot.store.plan(pid)["status"] == "proposed"
+        assert "autre membre" in out.texts(OWNER)[-1]
 
         # A change request creates v2 and makes v1 un-approvable.
         llm.plans.append(copy.deepcopy(PLAN))
@@ -115,7 +114,7 @@ def test_approval_gate(make_bot):
         await bot.handle(BOSS, f"VALIDER {pid} v2", "5")
         await _drain(bot)
         assert bot.store.plan(pid)["status"] == "delivered"
-        assert any("Livraison" in t for t in out.texts(BOSS))  # approver gets deliverables too
+        assert any("Livraison" in t for t in out.texts(BOSS))  # the approver gets deliverables too
 
     asyncio.run(scenario())
 

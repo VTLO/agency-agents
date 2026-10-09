@@ -3,7 +3,8 @@
 Economy rules applied here, so callers cannot forget them:
   * callers name a tier (L/S/M), never a model id;
   * stable system blocks carry cache_control (skill prompts, protocol rules),
-    volatile content goes last in the user turn;
+    volatile content goes last in the user turn; multi-turn chats also cache
+    their history prefix;
   * effort is set explicitly per tier; Haiku gets no thinking at all;
   * every response's usage (incl. cache reads) is returned for the ledger.
 """
@@ -18,7 +19,7 @@ import anthropic
 
 from .config import EFFORT_MODELS, Settings, cost_usd
 
-log = logging.getLogger("m3lvin.llm")
+log = logging.getLogger("j3anclaud3.llm")
 
 
 @dataclass
@@ -43,7 +44,8 @@ class LLMResult:
 
 class LLM(Protocol):
     async def complete(
-        self, tier: str, system: list[str], user: str, *, max_tokens: int | None = None, purpose: str = ""
+        self, tier: str, system: list[str], user: str, *, max_tokens: int | None = None, purpose: str = "",
+        history: list[dict] | None = None,
     ) -> LLMResult: ...
 
 
@@ -60,7 +62,7 @@ class AnthropicLLM:
         self.s = settings
         self.client = client or anthropic.AsyncAnthropic(max_retries=3)
 
-    async def complete(self, tier, system, user, *, max_tokens=None, purpose=""):
+    async def complete(self, tier, system, user, *, max_tokens=None, purpose="", history=None):
         t = self.s.tier(tier)
         # system: list of stable blocks; the last one closes the cached prefix.
         sys_blocks = [{"type": "text", "text": s} for s in system if s]
@@ -70,8 +72,11 @@ class AnthropicLLM:
             model=t.model,
             max_tokens=max_tokens or t.max_tokens,
             system=sys_blocks,
-            messages=[{"role": "user", "content": user}],
+            messages=[*(history or []), {"role": "user", "content": user}],
         )
+        if history:
+            # Multi-turn chat: also cache the conversation prefix (stable between turns).
+            params["cache_control"] = {"type": "ephemeral"}
         betas: list[str] = []
         if t.model in EFFORT_MODELS:
             params["thinking"] = {"type": "adaptive"}

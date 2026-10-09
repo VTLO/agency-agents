@@ -1,6 +1,6 @@
 """Compact machine protocol shared by the planner, the executor and the workers.
 
-Humans only ever see French text rendered by M3LVin. Everything that travels
+Humans only ever see French text rendered by J3anClaud3. Everything that travels
 between machine components is terse English JSON with one/two-letter keys:
 English tokenizes ~20-30% cheaper than French, and short keys keep the
 per-step overhead to a few dozen tokens.

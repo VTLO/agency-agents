@@ -1,8 +1,9 @@
-"""Self-hosted web messaging: accounts, persistent history, real-time push (SSE).
+"""Self-hosted web messaging: sessions, persistent history, real-time push (SSE).
 
 Replaces any third-party messaging platform. Works in every browser (desktop,
 mobile, installable as a PWA) and through a plain HTTP API (curl, scripts,
-other bots) using the user's access code as a Bearer token.
+other bots) using the session token returned at login as a Bearer token.
+Everyone may chat: the session only ties a browser or a script to a first name.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pathlib import Path
 from .config import Settings
 from .store import Store
 
-SESSION_COOKIE = "m3s"
+SESSION_COOKIE = "j3s"
 SESSION_TTL = 30 * 24 * 3600
 
 
@@ -103,30 +104,5 @@ def read_session(secret: bytes, token: str | None) -> str | None:
     return user if int(exp) > time.time() else None
 
 
-def user_for_code(settings: Settings, code: str) -> str | None:
-    """Constant-time lookup of the account owning an access code."""
-    found = None
-    for u in settings.users.values():
-        if hmac.compare_digest(u.code.encode(), code.encode()):
-            found = u.name
-    return found
-
-
 def normalise_name(name: str) -> str:
     return "".join(ch for ch in name.strip().lower() if ch.isalnum() or ch in "-_.")[:40]
-
-
-class LoginLimiter:
-    """At most `limit` failed logins per client per window (brute-force guard)."""
-
-    def __init__(self, limit: int = 5, window: float = 60.0):
-        self.limit, self.window = limit, window
-        self.fails: dict[str, list[float]] = defaultdict(list)
-
-    def blocked(self, key: str) -> bool:
-        now = time.time()
-        self.fails[key] = [t for t in self.fails[key] if now - t < self.window]
-        return len(self.fails[key]) >= self.limit
-
-    def fail(self, key: str) -> None:
-        self.fails[key].append(time.time())

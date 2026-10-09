@@ -14,36 +14,41 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .config import Settings
+from .base import BaseBot, Outbox
+from .config import MODES, Settings
+from .conversation import Conversation
 from .llm import LLM, AnthropicLLM
-from .orchestrator import M3LVin, Outbox
+from .orchestrator import J3anClaud3
 from .skills import SkillRegistry
 from .store import Store
-from .web import (
-    SESSION_COOKIE, SESSION_TTL, Hub, LoginLimiter, WebOutbox, load_secret, make_session,
-    normalise_name, read_session, user_for_code,
-)
+from .web import SESSION_COOKIE, SESSION_TTL, Hub, WebOutbox, load_secret, make_session, normalise_name, read_session
 
-log = logging.getLogger("m3lvin.app")
+log = logging.getLogger("j3anclaud3.app")
 STATIC = Path(__file__).parent / "static"
 
 
-def build_bot(settings: Settings, outbox: Outbox | None = None, llm: LLM | None = None, store: Store | None = None) -> M3LVin:
+def build_bot(settings: Settings, outbox: Outbox | None = None, llm: LLM | None = None, store: Store | None = None) -> BaseBot:
+    """Instantiate the bot for `settings.mode` ("orchestre" or "conversation")."""
+    if settings.mode not in MODES:
+        raise ValueError(f"mode inconnu '{settings.mode}' (attendu : {' ou '.join(MODES)})")
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    store = store or Store(settings.data_dir / "j3anclaud3.db")
+    outbox = outbox or WebOutbox(store, Hub())
+    llm = llm or AnthropicLLM(settings)
+    if settings.mode == "conversation":
+        log.info("mode conversation: plain chat, skills not loaded")
+        return Conversation(settings, store, llm, outbox)
     skills = SkillRegistry.open(
         settings.agency_root,
         settings.data_dir / f"skills-{settings.skill_prompt_tokens}.json",
         settings.skill_prompt_tokens,
     )
-    log.info("loaded %d lite skills", len(skills))
-    store = store or Store(settings.data_dir / "m3lvin.db")
-    outbox = outbox or WebOutbox(store, Hub())
-    return M3LVin(settings, store, skills, llm or AnthropicLLM(settings), outbox)
+    log.info("mode orchestre: loaded %d lite skills", len(skills))
+    return J3anClaud3(settings, store, skills, llm, outbox)
 
 
 class LoginIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
-    code: str = Field(default="", max_length=200)
 
 
 class SendIn(BaseModel):
@@ -51,10 +56,9 @@ class SendIn(BaseModel):
     id: str | None = Field(default=None, max_length=80)  # client id -> idempotent retries
 
 
-def create_app(settings: Settings | None = None, bot: M3LVin | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> FastAPI:
     settings = settings or Settings()
     secret = load_secret(settings)
-    limiter = LoginLimiter()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -63,18 +67,20 @@ def create_app(settings: Settings | None = None, bot: M3LVin | None = None) -> F
         await app.state.bot.recover()
         yield
 
-    app = FastAPI(title="M3LVin", lifespan=lifespan, docs_url="/api/docs", redoc_url=None)
+    app = FastAPI(title="J3anClaud3", lifespan=lifespan, docs_url="/api/docs", redoc_url=None)
     app.state.bot = bot
 
     def current_user(request: Request) -> str:
+        # Everyone may use the bot; the session only remembers who is who.
         auth = request.headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            user = user_for_code(settings, auth[7:].strip())
-        else:
-            user = read_session(secret, request.cookies.get(SESSION_COOKIE))
-        if not user or not settings.is_member(user):
-            raise HTTPException(401, "non authentifié")
+        token = auth[7:].strip() if auth.lower().startswith("bearer ") else request.cookies.get(SESSION_COOKIE)
+        user = read_session(secret, token)
+        if not user:
+            raise HTTPException(401, "non connecté")
         return user
+
+    def bot_mode() -> str:
+        return app.state.bot.mode if app.state.bot else settings.mode
 
     def outbox() -> WebOutbox:
         out = app.state.bot.out
@@ -105,27 +111,19 @@ def create_app(settings: Settings | None = None, bot: M3LVin | None = None) -> F
 
     @app.get("/api/config")
     async def public_config():
-        return {"open": settings.open_mode}
+        return {"mode": bot_mode()}
 
     # --- auth ----------------------------------------------------------------
     @app.post("/api/login")
     async def login(body: LoginIn, request: Request, response: Response):
-        key = request.client.host if request.client else "?"
-        if limiter.blocked(key):
-            raise HTTPException(429, "trop de tentatives, réessayez dans une minute")
-        if settings.open_mode:
-            user = normalise_name(body.name)
-        else:
-            name = normalise_name(body.name)
-            owner = user_for_code(settings, body.code) if body.code else None
-            user = owner if owner == name else None
+        user = normalise_name(body.name)
         if not user:
-            limiter.fail(key)
-            raise HTTPException(401, "identifiant ou code incorrect")
+            raise HTTPException(422, "prénom invalide (lettres, chiffres, - _ .)")
+        token = make_session(secret, user)
         secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-        response.set_cookie(SESSION_COOKIE, make_session(secret, user), max_age=SESSION_TTL,
-                            httponly=True, samesite="lax", secure=secure)
-        return {"user": user, "approver": settings.is_approver(user), "open": settings.open_mode}
+        response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, samesite="lax", secure=secure)
+        # `token` lets API clients authenticate with "Authorization: Bearer <token>".
+        return {"user": user, "mode": bot_mode(), "token": token}
 
     @app.post("/api/logout")
     async def logout(response: Response):
@@ -134,7 +132,7 @@ def create_app(settings: Settings | None = None, bot: M3LVin | None = None) -> F
 
     @app.get("/api/me")
     async def me(user: str = Depends(current_user)):
-        return {"user": user, "approver": settings.is_approver(user), "open": settings.open_mode}
+        return {"user": user, "mode": bot_mode()}
 
     # --- messaging -----------------------------------------------------------
     @app.get("/api/messages")
@@ -143,7 +141,7 @@ def create_app(settings: Settings | None = None, bot: M3LVin | None = None) -> F
 
     @app.post("/api/send", status_code=202)
     async def send(body: SendIn, user: str = Depends(current_user)):
-        bot: M3LVin = app.state.bot
+        bot: BaseBot = app.state.bot
         msg_id = f"{user}:{body.id or uuid.uuid4().hex}"
         bot._spawn(bot.handle(user, body.text, msg_id))
         return {"ok": True}
@@ -199,16 +197,17 @@ def _sse(m: dict) -> str:
     return f"id: {m['id']}\nevent: message\ndata: {json.dumps(_public(m), ensure_ascii=False)}\n\n"
 
 
-def main() -> None:  # pragma: no cover - entry point
+def main(mode: str | None = None) -> None:  # pragma: no cover - entry point
     import uvicorn
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     settings = Settings()
-    if settings.open_mode:
-        log.warning("M3_USERS is empty: open mode, anyone reaching this server can use and approve. Local use only.")
-    # Open mode listens on localhost only unless HOST is set explicitly.
-    host = os.environ.get("HOST") or ("127.0.0.1" if settings.open_mode else "0.0.0.0")
-    uvicorn.run(create_app(settings), host=host, port=int(os.environ.get("PORT", "8080")))
+    if mode:
+        settings.mode = mode
+    log.info("J3anClaud3 en mode %s", settings.mode)
+    log.warning("No accounts: anyone who can reach this server can chat (and spend API credit).")
+    host = os.environ.get("HOST", "0.0.0.0")
+    uvicorn.run(create_app(settings, build_bot(settings)), host=host, port=int(os.environ.get("PORT", "8080")))
 
 
 if __name__ == "__main__":  # pragma: no cover

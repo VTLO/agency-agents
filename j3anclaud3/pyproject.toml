@@ -1,7 +1,7 @@
 [project]
-name = "m3lvin"
+name = "j3anclaud3"
 version = "0.1.0"
-description = "M3LVin — chatbot orchestrateur francophone pour les agents de The Agency (web, API, terminal)"
+description = "J3anClaud3 — chatbot orchestrateur francophone pour les agents de The Agency (web, API, terminal)"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.11,<2",
@@ -13,17 +13,17 @@ dependencies = [
 dev = ["pytest>=8", "httpx>=0.27", "httpx2>=2.0"]
 
 [project.scripts]
-m3lvin = "m3lvin.cli:main"
+j3anclaud3 = "j3anclaud3.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["m3lvin"]
+packages = ["j3anclaud3"]
 
 [tool.setuptools.package-data]
-m3lvin = ["static/*"]
+j3anclaud3 = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,5 +1,5 @@
 # Build from the repository root so the agent library is included:
-#   docker build -f m3lvin/Dockerfile -t m3lvin .
+#   docker build -f j3anclaud3/Dockerfile -t j3anclaud3 .
 FROM python:3.12-slim
 
 WORKDIR /srv/agency
@@ -17,15 +17,15 @@ COPY spatial-computing ./spatial-computing
 COPY specialized ./specialized
 COPY support ./support
 COPY testing ./testing
-COPY m3lvin ./m3lvin
+COPY j3anclaud3 ./j3anclaud3
 
-RUN pip install --no-cache-dir ./m3lvin && mkdir -p /data && chown nobody /data
+RUN pip install --no-cache-dir ./j3anclaud3 && mkdir -p /data && chown nobody /data
 
-ENV M3_AGENCY_ROOT=/srv/agency \
-    M3_DATA_DIR=/data \
+ENV J3_AGENCY_ROOT=/srv/agency \
+    J3_DATA_DIR=/data \
     PORT=8080 \
     HOST=0.0.0.0
 VOLUME ["/data"]
 EXPOSE 8080
 USER nobody
-CMD ["m3lvin", "serve"]
+CMD ["j3anclaud3", "serve"]

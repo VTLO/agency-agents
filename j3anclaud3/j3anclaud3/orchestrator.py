@@ -1,4 +1,4 @@
-"""M3LVin: the only human-facing entry and exit point.
+"""J3anClaud3: the only human-facing entry and exit point.
 
 Lifecycle of a project (per user conversation, whatever the client: web, API, terminal):
 
@@ -7,19 +7,16 @@ Lifecycle of a project (per user conversation, whatever the client: web, API, te
        │                         └──┘ (new frozen version, approval reset)       │
        └────────────── ACCEPTER / NOUVEAU / ANNULER ◀── REVOIR (new version) ◀───┘
 
-Nothing reaches production without an explicit approval, by an authorised
-approver, of an exact frozen plan version. Commands are parsed locally
+Nothing reaches production without an explicit human approval of an exact
+frozen plan version. Commands are parsed locally
 (zero tokens); only open conversation goes through the chat model.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from collections import defaultdict
-from pathlib import Path
-from typing import Protocol
 
+from .base import BaseBot, Outbox
 from .config import Settings, cost_usd
 from .executor import BudgetExceeded, Executor, RunStopped
 from .llm import LLM
@@ -28,11 +25,11 @@ from .protocol import Command, PlanError, dumps, extract_json, parse_command, pl
 from .skills import SkillRegistry
 from .store import Store
 
-log = logging.getLogger("m3lvin")
+log = logging.getLogger("j3anclaud3")
 
 TIER_ICON = {"L": "⚡", "S": "⚙️", "M": "🧠"}
 
-HELP = """👋 Je suis **M3LVin**, votre chef d'orchestre.
+HELP = """👋 Je suis **J3anClaud3**, votre chef d'orchestre.
 Décrivez-moi votre besoin en langage naturel : je le cadre avec vous, je vous propose un **plan** de production, et je ne lance rien sans validation.
 
 Commandes :
@@ -47,46 +44,22 @@ Commandes :
 • **NOUVEAU** – repartir de zéro"""
 
 
-class Outbox(Protocol):
-    async def send_text(self, to: str, text: str) -> None: ...
-    async def send_buttons(self, to: str, text: str, buttons: list[tuple[str, str]]) -> None: ...
-    async def send_document(self, to: str, path: Path, caption: str = "") -> None: ...
+class J3anClaud3(BaseBot):
+    """Mode "orchestre": cadrage, plan, human validation, production with the lite skills."""
 
+    mode = "orchestre"
 
-class M3LVin:
     def __init__(self, settings: Settings, store: Store, skills: SkillRegistry, llm: LLM, outbox: Outbox):
-        self.s, self.store, self.skills, self.llm, self.out = settings, store, skills, llm, outbox
+        super().__init__(settings, store, llm, outbox)
+        self.skills = skills
         self.executor = Executor(settings, store, skills, llm)
-        self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.tasks: set[asyncio.Task] = set()
 
-    # ------------------------------------------------------------------ entry
-    async def handle(self, user: str, text: str, msg_id: str | None = None) -> None:
-        if msg_id and self.store.seen(msg_id):
-            return
-        if not self.s.is_member(user):
-            self.store.audit(user, "rejected_sender")
-            await self.out.send_text(user, "Désolé, ce compte n'est pas autorisé à piloter M3LVin.")
-            return
-        text = (text or "").strip()
-        if not text:
-            return
-        record = getattr(self.out, "record_inbound", None)
-        if record:  # clients with a message history (web) show the human's own messages too
-            await record(user, text)
-        async with self.locks[user]:
-            conv = self.store.conv(user)
-            cmd = parse_command(text)
-            try:
-                if cmd:
-                    await self._command(conv, cmd)
-                else:
-                    await self._chat(conv, text)
-            except Exception:  # noqa: BLE001 - never leave a human without an answer
-                log.exception("handling failed for %s", user)
-                await self.out.send_text(user, "Oups, un incident technique m'a interrompu. Pouvez-vous reformuler ou réessayer ?")
-            finally:
-                self.store.save_conv(conv)
+    async def _dispatch(self, conv: dict, text: str) -> None:
+        cmd = parse_command(text)
+        if cmd:
+            await self._command(conv, cmd)
+        else:
+            await self._chat(conv, text)
 
     # --------------------------------------------------------------- commands
     async def _command(self, conv: dict, cmd: Command) -> None:
@@ -143,16 +116,11 @@ class M3LVin:
         if rec["version"] != latest["version"]:
             await self.out.send_text(user, f"La v{rec['version']} est périmée. La version courante est la v{latest['version']}.")
             return
-        if not self.s.is_approver(user):
-            await self.out.send_text(user, "Vous n'êtes pas habilité à valider un plan. J'ai prévenu les validateurs.")
-            await self._notify_approvers(rec, exclude=user)
-            return
         if rec["status"] not in ("proposed", "stopped"):
             await self.out.send_text(user, f"Ce plan est {_STATUS_FR.get(rec['status'], rec['status'])} : rien à valider.")
             return
         if user == rec["owner"] and not self.s.allow_self_approval:
-            await self.out.send_text(user, "La validation doit venir d'un autre membre habilité de l'équipe.")
-            await self._notify_approvers(rec, exclude=user)
+            await self.out.send_text(user, f"La validation doit venir d'un autre membre de l'équipe (**VALIDER {pid} v{rec['version']}**).")
             return
         count = self.store.approve(pid, rec["version"], user) if rec["status"] == "proposed" else self.s.required_approvals
         self.store.audit(user, "approved", plan=pid, version=rec["version"], hash=rec["hash"])
@@ -288,9 +256,6 @@ class M3LVin:
             user, text,
             [(f"VALIDER {pid} v{version}", "✅ Valider"), ("MODIFIER", "✏️ Modifier"), (f"ANNULER {pid}", "❌ Annuler")],
         )
-        rec = self.store.plan(pid, version)
-        if not self.s.is_approver(user) or not self.s.allow_self_approval:
-            await self._notify_approvers(rec, exclude=user)
 
     def render_plan(self, pid: str, version: int, plan: dict, est: int) -> str:
         """Deterministic French rendering: zero tokens spent on presentation."""
@@ -314,11 +279,6 @@ class M3LVin:
         return "\n".join(lines)
 
     # -------------------------------------------------------------- execution
-    def _spawn(self, coro) -> None:
-        task = asyncio.create_task(coro)
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
-
     async def _run(self, pid: str, version: int, owner: str, approver: str) -> None:
         recipients = list(dict.fromkeys([owner, approver]))
 
@@ -343,7 +303,7 @@ class M3LVin:
             return
 
         self.store.set_plan_status(pid, version, "delivered")
-        self.store.audit("m3lvin", "delivered", plan=pid, version=version, tokens=result.tokens, cost=result.cost)
+        self.store.audit("j3anclaud3", "delivered", plan=pid, version=version, tokens=result.tokens, cost=result.cost)
         conv = self.store.conv(owner)
         if conv["plan_id"] == pid:
             conv["state"] = "livraison"
@@ -362,20 +322,12 @@ class M3LVin:
         for rec in self.store.plans_with_status("running", "approved"):
             self.store.set_plan_status(rec["id"], rec["version"], "stopped")
             try:
-                await self.out.send_text(rec["owner"], f"🔄 M3LVin a redémarré : production {rec['id']} v{rec['version']} suspendue. "
+                await self.out.send_text(rec["owner"], f"🔄 J3anClaud3 a redémarré : production {rec['id']} v{rec['version']} suspendue. "
                                                        f"**VALIDER {rec['id']} v{rec['version']}** pour reprendre.")
             except Exception:  # noqa: BLE001
                 log.warning("could not notify %s", rec["owner"])
 
     # ---------------------------------------------------------------- helpers
-    async def _notify_approvers(self, rec: dict, exclude: str) -> None:
-        for ap in self.s.approvers() - {exclude}:
-            text = self.render_plan(rec["id"], rec["version"], rec["body"], rec["est_tokens"])
-            try:
-                await self.out.send_text(ap, f"🔔 Validation demandée par {rec['owner']}\n\n{text}")
-            except Exception:  # noqa: BLE001
-                log.warning("could not notify approver %s", ap)
-
     async def _broadcast(self, rec: dict, text: str, actor: str) -> None:
         for to in dict.fromkeys([actor, rec["owner"]]):
             await self.out.send_text(to, text)

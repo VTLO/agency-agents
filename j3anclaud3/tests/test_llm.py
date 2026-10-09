@@ -4,8 +4,8 @@ import json
 import anthropic
 import httpx2
 
-from m3lvin.config import Settings
-from m3lvin.llm import AnthropicLLM
+from j3anclaud3.config import Settings
+from j3anclaud3.llm import AnthropicLLM
 
 
 def _client(seen):
@@ -42,3 +42,13 @@ def test_request_shape_per_tier():
     assert lite["model"] == "claude-haiku-4-5"
     assert not {"thinking", "output_config", "fallbacks"} & lite.keys()
     assert r1.cache_read == 900 and r1.text == "ok" and r1.cost > 0
+
+
+def test_multi_turn_request_caches_history():
+    seen = []
+    llm = AnthropicLLM(Settings(), _client(seen))
+    hist = [{"role": "user", "content": "Bonjour"}, {"role": "assistant", "content": "Salut !"}]
+    asyncio.run(llm.complete("S", ["persona"], "Ça va ?", max_tokens=500, purpose="conversation", history=hist))
+    _, body = seen[0]
+    assert body["messages"] == [*hist, {"role": "user", "content": "Ça va ?"}]
+    assert body["cache_control"] == {"type": "ephemeral"}

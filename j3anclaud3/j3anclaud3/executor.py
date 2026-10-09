@@ -15,7 +15,7 @@ from .protocol import dumps, split_digest, topo_levels
 from .skills import SkillRegistry
 from .store import Store
 
-log = logging.getLogger("m3lvin.exec")
+log = logging.getLogger("j3anclaud3.exec")
 
 Progress = Callable[[str], Awaitable[None]]
 

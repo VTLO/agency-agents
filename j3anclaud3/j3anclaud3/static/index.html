@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>M3LVin</title>
-<meta name="description" content="M3LVin, chef d'orchestre de votre agence d'agents IA">
+<title>J3anClaud3</title>
+<meta name="description" content="J3anClaud3, assistant IA francophone et chef d'orchestre d'agents">
 <meta name="theme-color" content="#0f766e">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -137,25 +137,21 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
   <form class="card" id="loginForm" autocomplete="on">
     <div class="brand">
       <img src="/icon.svg" alt="">
-      <div><h1>M3LVin</h1><p>Le chef d'orchestre de votre agence d'agents IA</p></div>
+      <div><h1>J3anClaud3</h1><p id="tagline">Votre assistant IA francophone</p></div>
     </div>
-    <label for="name">Identifiant</label>
-    <input class="field" id="name" name="username" autocomplete="username" required maxlength="40">
-    <div id="codeWrap">
-      <label for="code">Code d'accès</label>
-      <input class="field" id="code" name="password" type="password" autocomplete="current-password" maxlength="200">
-    </div>
-    <button class="primary" id="loginBtn">Se connecter</button>
+    <label for="name">Votre prénom</label>
+    <input class="field" id="name" name="username" autocomplete="given-name" required maxlength="40">
+    <button class="primary" id="loginBtn">Commencer</button>
     <div class="error" id="loginErr" role="alert"></div>
-    <p class="note" id="openNote" hidden>Mode ouvert (usage local) : choisissez simplement un prénom.</p>
+    <p class="note">Il sert à retrouver votre conversation sur tous vos appareils.</p>
   </form>
 </main>
 
-<section id="chat" class="hidden" aria-label="Conversation avec M3LVin">
+<section id="chat" class="hidden" aria-label="Conversation avec J3anClaud3">
   <header>
     <img src="/icon.svg" alt="">
     <div class="who">
-      <b>M3LVin</b>
+      <b>J3anClaud3</b>
       <span><i class="dot" id="dot"></i><span id="status">connexion…</span></span>
     </div>
     <button class="icon-btn" id="themeBtn" type="button" title="Changer le thème" aria-label="Changer le thème">
@@ -164,11 +160,11 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
     <button class="icon-btn" id="logoutBtn" type="button">Déconnexion</button>
   </header>
   <div id="feed" role="log" aria-live="polite"></div>
-  <div class="typing hidden" id="typing"><i></i><i></i><i></i> M3LVin rédige…</div>
+  <div class="typing hidden" id="typing"><i></i><i></i><i></i> J3anClaud3 rédige…</div>
   <div class="quick" aria-label="Raccourcis">
-    <button type="button" data-send="STATUT">📊 Statut</button>
-    <button type="button" data-send="PROJETS">📂 Projets</button>
-    <button type="button" data-send="PLAN">🧩 Plan</button>
+    <button type="button" data-send="STATUT" data-mode="orchestre">📊 Statut</button>
+    <button type="button" data-send="PROJETS" data-mode="orchestre">📂 Projets</button>
+    <button type="button" data-send="PLAN" data-mode="orchestre">🧩 Plan</button>
     <button type="button" data-send="NOUVEAU">🆕 Nouveau</button>
     <button type="button" data-send="AIDE">❔ Aide</button>
   </div>
@@ -198,13 +194,13 @@ const seen = new Set();
 
 // --- theme (per-device preference) -------------------------------------------
 function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
-try { applyTheme(localStorage.getItem("m3-theme")); } catch (e) {}
+try { applyTheme(localStorage.getItem("j3-theme")); } catch (e) {}
 $("themeBtn").onclick = () => {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   const cur = document.documentElement.dataset.theme || (dark ? "dark" : "light");
   const next = cur === "dark" ? "light" : "dark";
   applyTheme(next);
-  try { localStorage.setItem("m3-theme", next); } catch (e) {}
+  try { localStorage.setItem("j3-theme", next); } catch (e) {}
 };
 
 // --- tiny, safe Markdown (escape first, then a small subset) -----------------
@@ -280,9 +276,10 @@ function render(m) {
 function scrollDown() { feed.scrollTop = feed.scrollHeight; }
 function showEmpty() {
   if (feed.children.length) return;
-  feed.innerHTML = `<div class="empty"><p>👋 Bonjour <b>${esc(me.user)}</b> !</p>
-    <p>Décrivez votre besoin en langage naturel. Je le cadre avec vous, je vous propose un <b>plan</b>,
-    et je ne lance la production qu'après <b>validation</b>.</p></div>`;
+  const intro = me.mode === "conversation"
+    ? "Posez-moi vos questions ou discutons librement, en langage naturel."
+    : "Décrivez votre besoin en langage naturel. Je le cadre avec vous, je vous propose un <b>plan</b>, et je ne lance la production qu'après <b>validation</b>.";
+  feed.innerHTML = `<div class="empty"><p>👋 Bonjour <b>${esc(me.user)}</b> !</p><p>${intro}</p></div>`;
 }
 function setTyping(on) {
   pendingReply = on;
@@ -294,7 +291,7 @@ function setTyping(on) {
 // --- notifications when the tab is in the background --------------------------
 function notify(m) {
   if (!document.hidden || !("Notification" in window) || Notification.permission !== "granted") return;
-  try { new Notification("M3LVin", { body: m.kind === "doc" ? "📎 " + (m.meta.name || "Livrable") : m.body.slice(0, 140), icon: "/icon.svg" }); } catch (e) {}
+  try { new Notification("J3anClaud3", { body: m.kind === "doc" ? "📎 " + (m.meta.name || "Livrable") : m.body.slice(0, 140), icon: "/icon.svg" }); } catch (e) {}
 }
 
 // --- network -----------------------------------------------------------------
@@ -349,16 +346,21 @@ async function showLogin() {
   if (es) es.close();
   $("chat").classList.add("hidden");
   $("login").classList.remove("hidden");
-  try {
-    const cfg = await fetch("/api/config").then(r => r.json());
-    $("codeWrap").hidden = cfg.open; $("openNote").hidden = !cfg.open;
-    $("code").required = !cfg.open;
-  } catch (e) {}
+  try { applyMode((await fetch("/api/config").then(r => r.json())).mode); } catch (e) {}
   $("name").focus();
+}
+
+// Two modes: "orchestre" (plans, skills, deliverables) and "conversation" (plain chat).
+function applyMode(mode) {
+  const chat = mode === "conversation";
+  $("tagline").textContent = chat ? "Votre assistant IA francophone" : "Le chef d'orchestre de votre agence d'agents IA";
+  $("input").placeholder = chat ? "Écrivez votre message…" : "Décrivez votre besoin…";
+  document.querySelectorAll('[data-mode="orchestre"]').forEach(b => b.hidden = chat);
 }
 
 async function showChat(info) {
   me = info;
+  applyMode(info.mode);
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
   const history = await api("/api/messages?after=" + lastId);
@@ -374,7 +376,7 @@ $("loginForm").onsubmit = async (e) => {
   $("loginBtn").disabled = true; $("loginErr").textContent = "";
   try {
     const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $("name").value, code: $("code").value }) });
+      body: JSON.stringify({ name: $("name").value }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Connexion refusée");
     await showChat(data);

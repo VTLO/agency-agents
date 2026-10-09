@@ -1,15 +1,15 @@
-name: M3LVin tests
+name: J3anClaud3 tests
 
 on:
   pull_request:
     paths:
-      - 'm3lvin/**'
-      - '.github/workflows/m3lvin.yml'
+      - 'j3anclaud3/**'
+      - '.github/workflows/j3anclaud3.yml'
   push:
     branches:
       - main
     paths:
-      - 'm3lvin/**'
+      - 'j3anclaud3/**'
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: m3lvin
+        working-directory: j3anclaud3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,5 +1,5 @@
-from m3lvin.protocol import est_tokens
-from m3lvin.skills import SkillRegistry, compress_body
+from j3anclaud3.protocol import est_tokens
+from j3anclaud3.skills import SkillRegistry, compress_body
 
 from .conftest import AGENCY_ROOT
 

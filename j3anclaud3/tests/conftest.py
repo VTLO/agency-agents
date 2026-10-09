@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from m3lvin.config import Settings
-from m3lvin.llm import LLMResult
-from m3lvin.orchestrator import M3LVin
-from m3lvin.skills import SkillRegistry
-from m3lvin.store import Store
+from j3anclaud3.config import Settings
+from j3anclaud3.llm import LLMResult
+from j3anclaud3.orchestrator import J3anClaud3
+from j3anclaud3.skills import SkillRegistry
+from j3anclaud3.store import Store
 
 AGENCY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,10 +19,14 @@ class FakeLLM:
         self.calls: list[tuple[str, str, list[str], str]] = []
         self.chat_replies: list[dict] = []
         self.plans: list[dict | str] = []
+        self.histories: list[list | None] = []
 
-    async def complete(self, tier, system, user, *, max_tokens=None, purpose=""):
+    async def complete(self, tier, system, user, *, max_tokens=None, purpose="", history=None):
         self.calls.append((purpose, tier, system, user))
-        if purpose == "chat":
+        self.histories.append(history)
+        if purpose == "conversation":
+            text = f"Réponse {len(self.histories)}"
+        elif purpose == "chat":
             text = json.dumps(self.chat_replies.pop(0))
         elif purpose == "plan":
             p = self.plans.pop(0)
@@ -67,7 +71,7 @@ def make_bot(tmp_path, registry):
         for k, v in overrides.items():
             setattr(s, k, v)
         llm, out = FakeLLM(), MemoryOutbox()
-        bot = M3LVin(s, Store(":memory:"), registry, llm, out)
+        bot = J3anClaud3(s, Store(":memory:"), registry, llm, out)
         return bot, llm, out
 
     return _make

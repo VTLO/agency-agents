@@ -3,7 +3,7 @@
 Each agent markdown (often 3-8k tokens) becomes:
   * a *card*  (~40 tokens): slug, name, category, one-line description —
     the only thing the planner ever sees, and only for a shortlist;
-  * a *lite prompt* (<= M3_SKILL_PROMPT_TOKENS): identity, mission, rules and
+  * a *lite prompt* (<= J3_SKILL_PROMPT_TOKENS): identity, mission, rules and
     workflow with code samples, emoji and boilerplate stripped — loaded only
     when a step actually runs, and sent as a cached system block.
 
