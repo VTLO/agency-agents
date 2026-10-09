@@ -1,0 +1,27 @@
+name: J3anClaud3 tests
+
+on:
+  pull_request:
+    paths:
+      - 'j3anclaud3/**'
+      - '.github/workflows/j3anclaud3.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'j3anclaud3/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: j3anclaud3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e ".[dev]"
+      - run: pytest -q

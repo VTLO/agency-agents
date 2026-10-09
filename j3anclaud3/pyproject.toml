@@ -1,0 +1,29 @@
+[project]
+name = "j3anclaud3"
+version = "0.1.0"
+description = "J3anClaud3 — chatbot orchestrateur francophone pour les agents de The Agency (web, API, terminal)"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.11,<2",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "httpx2>=2.0"]
+
+[project.scripts]
+j3anclaud3 = "j3anclaud3.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["j3anclaud3"]
+
+[tool.setuptools.package-data]
+j3anclaud3 = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

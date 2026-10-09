@@ -1,0 +1,14 @@
+{
+  "name": "J3anClaud3",
+  "short_name": "J3anClaud3",
+  "description": "Assistant IA francophone et chef d'orchestre d'agents",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1013",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
