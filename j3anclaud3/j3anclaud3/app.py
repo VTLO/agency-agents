@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -21,7 +22,9 @@ from .llm import LLM, AnthropicLLM
 from .orchestrator import J3anClaud3
 from .skills import SkillRegistry
 from .store import Store
-from .web import SESSION_COOKIE, SESSION_TTL, Hub, WebOutbox, load_secret, make_session, normalise_name, read_session
+from .web import (
+    SESSION_COOKIE, SESSION_TTL, Hub, LoginLimiter, WebOutbox, load_secret, make_session, normalise_name, session_info,
+)
 
 log = logging.getLogger("j3anclaud3.app")
 STATIC = Path(__file__).parent / "static"
@@ -49,6 +52,12 @@ def build_bot(settings: Settings, outbox: Outbox | None = None, llm: LLM | None 
 
 class LoginIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
+    password: str = Field(default="", max_length=200)  # only for the admin account
+
+
+class BlockIn(BaseModel):
+    user: str = Field(min_length=1, max_length=60)
+    blocked: bool = True
 
 
 class SendIn(BaseModel):
@@ -59,6 +68,7 @@ class SendIn(BaseModel):
 def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> FastAPI:
     settings = settings or Settings()
     secret = load_secret(settings)
+    limiter = LoginLimiter()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -70,14 +80,26 @@ def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> 
     app = FastAPI(title="J3anClaud3", lifespan=lifespan, docs_url="/api/docs", redoc_url=None)
     app.state.bot = bot
 
-    def current_user(request: Request) -> str:
+    def session(request: Request) -> tuple[str, bool]:
         # Everyone may use the bot; the session only remembers who is who.
         auth = request.headers.get("authorization", "")
         token = auth[7:].strip() if auth.lower().startswith("bearer ") else request.cookies.get(SESSION_COOKIE)
-        user = read_session(secret, token)
-        if not user:
+        info = session_info(secret, token)
+        if not info:
             raise HTTPException(401, "non connecté")
-        return user
+        user, admin = info
+        # The admin name is reserved: a session for it is only valid if issued with the password.
+        if settings.admin_enabled and user == settings.admin_name and not admin:
+            raise HTTPException(401, "session administrateur requise")
+        return user, admin and settings.is_admin(user)
+
+    def current_user(sess: tuple[str, bool] = Depends(session)) -> str:
+        return sess[0]
+
+    def current_admin(sess: tuple[str, bool] = Depends(session)) -> str:
+        if not sess[1]:
+            raise HTTPException(403, "réservé à l'administrateur")
+        return sess[0]
 
     def bot_mode() -> str:
         return app.state.bot.mode if app.state.bot else settings.mode
@@ -111,7 +133,7 @@ def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> 
 
     @app.get("/api/config")
     async def public_config():
-        return {"mode": bot_mode()}
+        return {"mode": bot_mode(), "admin_name": settings.admin_name if settings.admin_enabled else None}
 
     # --- auth ----------------------------------------------------------------
     @app.post("/api/login")
@@ -119,11 +141,19 @@ def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> 
         user = normalise_name(body.name)
         if not user:
             raise HTTPException(422, "prénom invalide (lettres, chiffres, - _ .)")
-        token = make_session(secret, user)
+        admin = settings.is_admin(user)
+        if admin:
+            key = request.client.host if request.client else "?"
+            if limiter.blocked(key):
+                raise HTTPException(429, "trop de tentatives, réessayez dans une minute")
+            if not hmac.compare_digest(body.password.encode(), settings.admin_password.encode()):
+                limiter.fail(key)
+                raise HTTPException(401, "ce nom est réservé : mot de passe administrateur requis")
+        token = make_session(secret, user, admin=admin)
         secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
         response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, samesite="lax", secure=secure)
         # `token` lets API clients authenticate with "Authorization: Bearer <token>".
-        return {"user": user, "mode": bot_mode(), "token": token}
+        return {"user": user, "mode": bot_mode(), "admin": admin, "token": token}
 
     @app.post("/api/logout")
     async def logout(response: Response):
@@ -131,8 +161,25 @@ def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> 
         return {"ok": True}
 
     @app.get("/api/me")
-    async def me(user: str = Depends(current_user)):
-        return {"user": user, "mode": bot_mode()}
+    async def me(sess: tuple[str, bool] = Depends(session)):
+        return {"user": sess[0], "mode": bot_mode(), "admin": sess[1]}
+
+    # --- administration ------------------------------------------------------
+    @app.get("/api/admin/overview")
+    async def admin_overview(admin: str = Depends(current_admin)):
+        data = app.state.bot.store.overview()
+        data["mode"] = bot_mode()
+        data["admin_approval"] = settings.approval_by_admin_only
+        return data
+
+    @app.post("/api/admin/block")
+    async def admin_block(body: BlockIn, admin: str = Depends(current_admin)):
+        user = normalise_name(body.user)
+        if not user or user == admin:
+            raise HTTPException(422, "personne invalide")
+        app.state.bot.store.set_blocked(user, body.blocked, admin)
+        app.state.bot.store.audit(admin, "block" if body.blocked else "unblock", user=user)
+        return {"user": user, "blocked": body.blocked}
 
     # --- messaging -----------------------------------------------------------
     @app.get("/api/messages")
@@ -205,7 +252,10 @@ def main(mode: str | None = None) -> None:  # pragma: no cover - entry point
     if mode:
         settings.mode = mode
     log.info("J3anClaud3 en mode %s", settings.mode)
-    log.warning("No accounts: anyone who can reach this server can chat (and spend API credit).")
+    if settings.admin_enabled:
+        log.info("admin account '%s' enabled", settings.admin_name)
+    else:
+        log.warning("No admin account (J3_ADMIN_PASSWORD unset): anyone can chat AND launch production.")
     host = os.environ.get("HOST", "0.0.0.0")
     uvicorn.run(create_app(settings, build_bot(settings)), host=host, port=int(os.environ.get("PORT", "8080")))
 

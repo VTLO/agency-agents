@@ -38,6 +38,9 @@ class BaseBot:
         record = getattr(self.out, "record_inbound", None)
         if record:  # clients with a message history (web) show the human's own messages too
             await record(user, text)
+        if self.store.is_blocked(user):  # decided by the admin; costs zero tokens
+            await self.out.send_text(user, "Votre accès à J3anClaud3 a été suspendu par l'administrateur.")
+            return
         async with self.locks[user]:
             conv = self.store.conv(user)
             try:

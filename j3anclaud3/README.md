@@ -11,7 +11,8 @@ Il fonctionne selon l'un de deux **modes**, choisis au lancement :
 Le mode peut aussi être fixé par la variable `J3_MODE` (`orchestre` ou `conversation`) ; l'option `--mode` l'emporte.
 
 Aucune plateforme tierce de messagerie : J3anClaud3 embarque sa propre messagerie. **Tout le monde
-peut lui parler** : on indique simplement son prénom (un compte administrateur viendra plus tard).
+peut lui parler** : on indique simplement son prénom. Un **compte administrateur** protégé par mot
+de passe supervise l'ensemble (voir [Administration](#administration)).
 
 | Où | Comment |
 |---|---|
@@ -45,7 +46,7 @@ Fonctionnement du mode **orchestre** :
 cd j3anclaud3
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # renseigner ANTHROPIC_API_KEY
+cp .env.example .env          # renseigner ANTHROPIC_API_KEY (et J3_ADMIN_PASSWORD pour activer l'admin)
 set -a; . ./.env; set +a
 
 j3anclaud3 serve                        # mode orchestre, puis ouvrir http://localhost:8080
@@ -69,10 +70,10 @@ docker run -d -p 8080:8080 --env-file j3anclaud3/.env -v j3anclaud3-data:/data -
 # mode conversation : ajouter  -e J3_MODE=conversation  (ou terminer par : j3anclaud3 serve --mode conversation)
 ```
 
-> ⚠️ Sans compte, toute personne qui atteint le serveur peut discuter avec le bot, et donc consommer
-> votre crédit API. Tant que le compte administrateur n'existe pas, gardez-le sur un réseau privé
-> (VPN, réseau d'entreprise) ou derrière un reverse proxy avec authentification, ou lancez-le avec
-> `HOST=127.0.0.1` pour un usage uniquement local.
+> ⚠️ Toute personne qui atteint le serveur peut discuter avec le bot, et donc consommer votre crédit
+> API. Activez le compte administrateur (au minimum pour garder la main sur la production et pouvoir
+> bloquer un abus), et pour un service exposé à Internet, placez-le derrière un réseau privé (VPN)
+> ou un reverse proxy avec authentification. `HOST=127.0.0.1` limite l'accès à la machine locale.
 
 Pour un accès hors du réseau local, placez-le derrière un reverse proxy HTTPS (Caddy,
 Traefik, nginx…) : les cookies de session passent automatiquement en `Secure` en HTTPS.
@@ -118,11 +119,25 @@ En mode **orchestre** :
 | **Zéro-token** | Commandes (`VALIDER`, `STATUT`…), boutons, rendu du plan, authentification, déduplication : code déterministe. | — |
 | **Garde-fou budget** | Estimation affichée avant validation ; suspension automatique au-delà de ×1,5 ; reprise sans repayer les étapes faites. | pas de dérive |
 
+## Administration
+
+Le compte administrateur s'active en renseignant `J3_ADMIN_PASSWORD` (nom : `J3_ADMIN_NAME`, `admin` par défaut).
+
+* **Nom réservé** : se connecter avec ce nom exige le mot de passe (5 essais par minute au plus). Une session ouverte sous ce nom *avant* l'activation de l'admin n'a aucun droit et est refusée.
+* **Validation de la production** (mode orchestre, `J3_ADMIN_APPROVAL=1` par défaut) : les autres personnes cadrent et reçoivent leur plan, mais seul l'admin peut le lancer. Chaque plan arrive dans le fil de l'admin avec les boutons ✅ Valider / ❌ Refuser ; l'auteur est prévenu de la décision. `J3_ADMIN_APPROVAL=0` rend la validation à tout le monde.
+* **Panneau d'administration** (bouton 🔐 Admin dans l'interface) : nombre de personnes, tokens et coût total ; par personne, messages, tokens, coût et dernière activité ; plans récents et leur statut.
+* **Blocage** : depuis le panneau, l'admin bloque ou débloque une personne. Ses messages ne sont alors plus traités et ne consomment aucun token.
+* Sans `J3_ADMIN_PASSWORD`, il n'y a pas d'admin : tout le monde peut valider, comme avant.
+
+API : `GET /api/admin/overview`, `POST /api/admin/block {"user": "bob", "blocked": true}` (session admin requise ;
+le jeton s'obtient avec `POST /api/login {"name": "admin", "password": "…"}`).
+
 ## Gouvernance (mode orchestre) : rien ne tourne sans validation humaine
 
 * Un plan proposé est **figé** (hash SHA-256, version `vN`). Toute modification crée `vN+1` et invalide les validations précédentes.
 * `VALIDER` exige l'identifiant **et**, dès qu'il existe plusieurs versions, la version exacte. Les formulations ambiguës (« valide mais change X », « go ») ne valent **jamais** validation. Un bouton « Valider » d'une version périmée est refusé.
-* Tout le monde peut valider en attendant le compte administrateur ; `J3_ALLOW_SELF_APPROVAL=0` impose le principe des quatre yeux (un autre prénom doit valider) ; `J3_REQUIRED_APPROVALS` permet plusieurs signatures.
+* Avec un admin, lui seul valide (par défaut) ; sinon tout le monde peut valider. `J3_ALLOW_SELF_APPROVAL=0` impose le principe des quatre yeux (l'auteur ne valide pas son propre plan, sauf l'admin) ; `J3_REQUIRED_APPROVALS` permet plusieurs signatures.
+* Seuls l'auteur d'un plan et l'admin peuvent l'annuler.
 * Sessions signées (HMAC) ; chacun ne voit que son fil et ses fichiers.
 * Journal d'audit (`audit`) et registre de consommation (`ledger`) dans SQLite.
 * Au redémarrage, une production en cours est **suspendue**, jamais relancée en silence.
@@ -158,9 +173,9 @@ Les plus courantes sont aussi des raccourcis cliquables sous la zone de saisie.
 | `orchestrator.py` | Mode orchestre : machine à états, gate de validation, rendu FR |
 | `conversation.py` | Mode conversation : chat multi-tours sans skills, historique borné par blocs |
 | `executor.py` | Exécution du DAG (parallèle), passation par digests, budget, reprise |
-| `store.py` | SQLite : conversations, historique des messages, versions de plan, validations, étapes, ledger, audit |
-| `web.py` | Messagerie intégrée : diffusion temps réel, sessions signées |
-| `app.py` | Serveur FastAPI : choix du mode, interface web, API JSON, flux SSE, téléchargement des livrables |
+| `store.py` | SQLite : conversations, historique des messages, versions de plan, validations, étapes, ledger, audit, blocages, synthèse admin |
+| `web.py` | Messagerie intégrée : diffusion temps réel, sessions signées (rôle admin inclus), anti-bruteforce admin |
+| `app.py` | Serveur FastAPI : choix du mode, interface web, API JSON, flux SSE, livrables, API d'administration |
 | `static/` | Interface de chat (HTML/CSS/JS sans dépendance), manifest PWA, service worker |
 | `prompts.py` | Prompts système figés (compatibles cache) |
 

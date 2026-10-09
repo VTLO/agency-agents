@@ -79,10 +79,26 @@ class Settings:
     chat_history: int = int(os.environ.get("J3_CHAT_HISTORY", "20"))  # messages kept in conversation mode
 
     # --- governance ---------------------------------------------------------
-    # Everyone may talk to the bot and approve plans (an admin account will come later).
+    # Everyone may talk to the bot. The admin account is enabled by J3_ADMIN_PASSWORD:
+    # its name is then reserved, and it alone can launch production (if J3_ADMIN_APPROVAL=1),
+    # see usage and block people.
+    admin_name: str = os.environ.get("J3_ADMIN_NAME", "admin").strip().lower()
+    admin_password: str = os.environ.get("J3_ADMIN_PASSWORD", "")
+    admin_approval: bool = os.environ.get("J3_ADMIN_APPROVAL", "1") == "1"
     required_approvals: int = int(os.environ.get("J3_REQUIRED_APPROVALS", "1"))
     allow_self_approval: bool = os.environ.get("J3_ALLOW_SELF_APPROVAL", "1") == "1"
     secret: str = os.environ.get("J3_SECRET", "")  # signs session cookies; generated if empty
+
+    @property
+    def admin_enabled(self) -> bool:
+        return bool(self.admin_password)
+
+    def is_admin(self, user: str) -> bool:
+        return self.admin_enabled and user == self.admin_name
+
+    @property
+    def approval_by_admin_only(self) -> bool:
+        return self.admin_enabled and self.admin_approval
 
     def tier(self, name: str) -> Tier:
         return self.tiers.get(name, self.tiers["S"])

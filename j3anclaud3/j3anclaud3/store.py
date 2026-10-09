@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS audit    (ts REAL, actor TEXT, event TEXT, data TEXT)
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, author TEXT,
                                      kind TEXT, body TEXT, meta TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS messages_user ON messages (user, id);
+CREATE TABLE IF NOT EXISTS blocked  (user TEXT PRIMARY KEY, ts REAL, by_user TEXT);
 """
 
 _ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I ambiguity when typed by hand
@@ -150,6 +151,50 @@ class Store:
     def message(self, msg_id: int) -> dict | None:
         r = self._x("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
         return {**dict(r), "meta": json.loads(r["meta"])} if r else None
+
+    # --- administration ------------------------------------------------------
+    def is_blocked(self, user: str) -> bool:
+        return self._x("SELECT 1 FROM blocked WHERE user=?", (user,)).fetchone() is not None
+
+    def set_blocked(self, user: str, blocked: bool, by: str) -> None:
+        if blocked:
+            self._x("INSERT OR REPLACE INTO blocked VALUES (?,?,?)", (user, time.time(), by))
+        else:
+            self._x("DELETE FROM blocked WHERE user=?", (user,))
+
+    def overview(self) -> dict:
+        """Per-person activity and spend, for the admin panel."""
+        usage = {
+            r["user"]: (int(r["tokens"]), float(r["cost"]))
+            for r in self._x(
+                """SELECT u AS user, SUM(t) AS tokens, SUM(c) AS cost FROM (
+                       SELECT CASE WHEN l.plan_id IS NULL THEN substr(l.purpose, instr(l.purpose, ':') + 1)
+                                   ELSE (SELECT owner FROM plans p WHERE p.id = l.plan_id LIMIT 1) END AS u,
+                              l.inp + l.outp + l.cache_r + l.cache_w AS t, l.cost AS c
+                       FROM ledger l) GROUP BY u"""
+            )
+        }
+        activity = {
+            r["user"]: (r["n"], r["last"])
+            for r in self._x("SELECT user, COUNT(*) AS n, MAX(ts) AS last FROM messages WHERE author='u' GROUP BY user")
+        }
+        blocked = {r["user"] for r in self._x("SELECT user FROM blocked")}
+        names = set(usage) | set(activity) | blocked | {r["user"] for r in self._x("SELECT user FROM convs")}
+        people = [
+            {"user": n, "messages": activity.get(n, (0, None))[0], "last": activity.get(n, (0, None))[1],
+             "tokens": usage.get(n, (0, 0.0))[0], "cost": round(usage.get(n, (0, 0.0))[1], 4), "blocked": n in blocked}
+            for n in names if n
+        ]
+        people.sort(key=lambda p: (p["last"] or 0), reverse=True)
+        plans = [dict(r) for r in self._x(
+            "SELECT id, version, owner, status, est_tokens, created FROM plans p"
+            " WHERE version=(SELECT MAX(version) FROM plans WHERE id=p.id) ORDER BY created DESC LIMIT 50"
+        )]
+        return {
+            "people": people,
+            "plans": plans,
+            "totals": {"tokens": sum(p["tokens"] for p in people), "cost": round(sum(p["cost"] for p in people), 4)},
+        }
 
     # --- ledger & audit -----------------------------------------------------
     def log_usage(self, pid: str | None, purpose: str, r) -> None:

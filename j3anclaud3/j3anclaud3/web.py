@@ -84,24 +84,49 @@ def load_secret(settings: Settings) -> bytes:
     return path.read_text().strip().encode()
 
 
-def make_session(secret: bytes, user: str, ttl: int = SESSION_TTL) -> str:
+def make_session(secret: bytes, user: str, ttl: int = SESSION_TTL, admin: bool = False) -> str:
     exp = str(int(time.time()) + ttl)
-    payload = base64.urlsafe_b64encode(f"{user}|{exp}".encode()).decode().rstrip("=")
+    payload = base64.urlsafe_b64encode(f"{user}|{exp}|{'a' if admin else 'u'}".encode()).decode().rstrip("=")
     sig = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
-def read_session(secret: bytes, token: str | None) -> str | None:
+def session_info(secret: bytes, token: str | None) -> tuple[str, bool] | None:
+    """(user, is_admin_session) for a valid, unexpired token; None otherwise."""
     if not token or "." not in token:
         return None
     payload, sig = token.rsplit(".", 1)
     if not hmac.compare_digest(hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest(), sig):
         return None
     try:
-        user, exp = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode().rsplit("|", 1)
-    except (ValueError, UnicodeDecodeError):
+        parts = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode().split("|")
+        user, exp = parts[0], int(parts[1])
+    except (ValueError, UnicodeDecodeError, IndexError):
         return None
-    return user if int(exp) > time.time() else None
+    if exp <= time.time():
+        return None
+    return user, len(parts) > 2 and parts[2] == "a"
+
+
+def read_session(secret: bytes, token: str | None) -> str | None:
+    info = session_info(secret, token)
+    return info[0] if info else None
+
+
+class LoginLimiter:
+    """At most `limit` failed admin logins per client per window (brute-force guard)."""
+
+    def __init__(self, limit: int = 5, window: float = 60.0):
+        self.limit, self.window = limit, window
+        self.fails: dict[str, list[float]] = defaultdict(list)
+
+    def blocked(self, key: str) -> bool:
+        now = time.time()
+        self.fails[key] = [t for t in self.fails[key] if now - t < self.window]
+        return len(self.fails[key]) >= self.limit
+
+    def fail(self, key: str) -> None:
+        self.fails[key].append(time.time())
 
 
 def normalise_name(name: str) -> str:

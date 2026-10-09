@@ -36,7 +36,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button, input, textarea { font: inherit; color: inherit; }
-.hidden { display: none !important; }
+.hidden, [hidden] { display: none !important; }
 
 /* login */
 #login { min-height: 100%; display: grid; place-items: center; padding: 24px 16px; }
@@ -125,6 +125,19 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
 #previewBody h1, #previewBody h2, #previewBody h3 { line-height: 1.25; margin: 18px 0 8px; }
 #previewBody pre { background: var(--surface-2); padding: 12px; border-radius: 10px; overflow-x: auto; }
 #previewBody table { border-collapse: collapse; display: block; overflow-x: auto; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.stat { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+.stat span { display: block; font-size: 12px; color: var(--muted); }
+.stat b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.admin-table th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; }
+.admin-table th, .admin-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); }
+.admin-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+.tag.off { background: rgba(180,35,24,.12); color: var(--danger); }
+.danger { color: var(--danger); }
+.table-wrap { overflow-x: auto; }
+#adminPanel h3 { font-size: 14px; margin: 18px 0 8px; }
 #previewBody td, #previewBody th { border: 1px solid var(--border); padding: 4px 8px; }
 @media (max-width: 600px) {
   #chat { border: 0; }
@@ -141,6 +154,10 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
     </div>
     <label for="name">Votre prénom</label>
     <input class="field" id="name" name="username" autocomplete="given-name" required maxlength="40">
+    <div id="pwWrap" hidden>
+      <label for="password">Mot de passe administrateur</label>
+      <input class="field" id="password" name="password" type="password" autocomplete="current-password" maxlength="200">
+    </div>
     <button class="primary" id="loginBtn">Commencer</button>
     <div class="error" id="loginErr" role="alert"></div>
     <p class="note">Il sert à retrouver votre conversation sur tous vos appareils.</p>
@@ -157,6 +174,7 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
     <button class="icon-btn" id="themeBtn" type="button" title="Changer le thème" aria-label="Changer le thème">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
     </button>
+    <button class="icon-btn" id="adminBtn" type="button" hidden>🔐 Admin</button>
     <button class="icon-btn" id="logoutBtn" type="button">Déconnexion</button>
   </header>
   <div id="feed" role="log" aria-live="polite"></div>
@@ -176,6 +194,21 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
   </form>
 </section>
 
+<dialog id="adminPanel" aria-label="Administration">
+  <header>
+    <div class="who"><b>Administration</b><span id="adminMeta"></span></div>
+    <button class="icon-btn" type="button" id="adminRefresh">Actualiser</button>
+    <button class="icon-btn" type="button" id="adminClose">Fermer</button>
+  </header>
+  <div class="admin-body" style="padding:16px 20px 24px; overflow-wrap:anywhere">
+    <div class="stats" id="adminStats"></div>
+    <h3>Personnes</h3>
+    <div class="table-wrap"><table class="admin-table" id="adminPeople"></table></div>
+    <h3>Plans récents</h3>
+    <div class="table-wrap"><table class="admin-table" id="adminPlans"></table></div>
+  </div>
+</dialog>
+
 <dialog id="preview">
   <header>
     <div class="who"><b id="previewTitle"></b></div>
@@ -189,7 +222,7 @@ dialog header { position: sticky; top: 0; padding-top: 10px; }
 "use strict";
 const $ = (id) => document.getElementById(id);
 const feed = $("feed");
-let lastId = 0, es = null, me = null, typingTimer = null, pendingReply = false;
+let lastId = 0, es = null, me = null, typingTimer = null, pendingReply = false, adminName = null;
 const seen = new Set();
 
 // --- theme (per-device preference) -------------------------------------------
@@ -346,7 +379,10 @@ async function showLogin() {
   if (es) es.close();
   $("chat").classList.add("hidden");
   $("login").classList.remove("hidden");
-  try { applyMode((await fetch("/api/config").then(r => r.json())).mode); } catch (e) {}
+  try {
+    const cfg = await fetch("/api/config").then(r => r.json());
+    applyMode(cfg.mode); adminName = cfg.admin_name; togglePassword();
+  } catch (e) {}
   $("name").focus();
 }
 
@@ -358,8 +394,63 @@ function applyMode(mode) {
   document.querySelectorAll('[data-mode="orchestre"]').forEach(b => b.hidden = chat);
 }
 
+// The admin name is reserved: its password field appears only when that name is typed.
+function togglePassword() {
+  const isAdmin = !!adminName && $("name").value.trim().toLowerCase() === adminName;
+  $("pwWrap").hidden = !isAdmin; $("password").required = isAdmin;
+}
+$("name").addEventListener("input", togglePassword);
+
+// --- admin panel ---------------------------------------------------------------
+const money = (n) => "$" + Number(n || 0).toFixed(n >= 1 ? 2 : 3);
+const ktok = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n || 0));
+const when = (ts) => ts ? new Date(ts * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+async function loadAdmin() {
+  const d = await api("/api/admin/overview");
+  $("adminMeta").textContent = `mode ${d.mode} · validation ${d.admin_approval ? "réservée à l'admin" : "ouverte"}`;
+  const active = d.people.filter(p => !p.blocked).length;
+  $("adminStats").innerHTML = [
+    ["Personnes", d.people.length], ["Actives", active], ["Tokens", ktok(d.totals.tokens)], ["Coût total", money(d.totals.cost)],
+  ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
+  const people = $("adminPeople");
+  people.innerHTML = "<tr><th>Prénom</th><th>Messages</th><th>Tokens</th><th>Coût</th><th>Dernière activité</th><th></th></tr>";
+  for (const p of d.people) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td></td><td class="num">${p.messages}</td><td class="num">${ktok(p.tokens)}</td><td class="num">${money(p.cost)}</td>
+      <td>${when(p.last)}</td><td class="num"></td>`;
+    tr.cells[0].textContent = p.user;
+    if (p.blocked) tr.cells[0].insertAdjacentHTML("beforeend", ' <span class="tag off">bloqué</span>');
+    if (p.user !== me.user) {
+      const b = document.createElement("button");
+      b.className = "icon-btn" + (p.blocked ? "" : " danger"); b.type = "button";
+      b.textContent = p.blocked ? "Débloquer" : "Bloquer";
+      b.onclick = async () => {
+        if (!p.blocked && !confirm(`Bloquer ${p.user} ? Ses messages ne seront plus traités.`)) return;
+        await api("/api/admin/block", { method: "POST", body: JSON.stringify({ user: p.user, blocked: !p.blocked }) });
+        loadAdmin();
+      };
+      tr.cells[5].appendChild(b);
+    }
+    people.appendChild(tr);
+  }
+  const plans = $("adminPlans");
+  plans.innerHTML = "<tr><th>Plan</th><th>Auteur</th><th>Statut</th><th>Estimation</th><th>Créé</th></tr>";
+  for (const p of d.plans) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td></td><td></td><td><span class="tag"></span></td><td class="num">${ktok(p.est_tokens)}</td><td>${when(p.created)}</td>`;
+    tr.cells[0].textContent = `${p.id} v${p.version}`; tr.cells[1].textContent = p.owner;
+    tr.querySelector(".tag").textContent = p.status;
+    plans.appendChild(tr);
+  }
+  if (!d.plans.length) plans.insertAdjacentHTML("beforeend", '<tr><td colspan="5">Aucun plan pour l\'instant.</td></tr>');
+}
+$("adminBtn").onclick = async () => { $("adminPanel").showModal(); try { await loadAdmin(); } catch (e) {} };
+$("adminRefresh").onclick = () => loadAdmin().catch(() => {});
+$("adminClose").onclick = () => $("adminPanel").close();
+
 async function showChat(info) {
   me = info;
+  $("adminBtn").hidden = !info.admin;
   applyMode(info.mode);
   $("login").classList.add("hidden");
   $("chat").classList.remove("hidden");
@@ -376,7 +467,7 @@ $("loginForm").onsubmit = async (e) => {
   $("loginBtn").disabled = true; $("loginErr").textContent = "";
   try {
     const r = await fetch("/api/login", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $("name").value }) });
+      body: JSON.stringify({ name: $("name").value, password: $("password").value }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "Connexion refusée");
     await showChat(data);

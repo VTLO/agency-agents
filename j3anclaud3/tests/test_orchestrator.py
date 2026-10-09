@@ -163,3 +163,20 @@ def test_commands_cost_zero_tokens(make_bot):
 
     asyncio.run(scenario())
     assert llm.calls == [] and len(out.sent) == 6
+
+
+def test_only_author_or_admin_can_cancel(make_bot):
+    bot, llm, out = make_bot(shortlist_size=500, admin_password="pw")
+
+    async def scenario():
+        _to_plan(llm)
+        await bot.handle(OWNER, "landing", "1")
+        pid = bot.store.conv(OWNER)["plan_id"]
+        await bot.handle("mallory", f"ANNULER {pid}", "2")
+        assert bot.store.plan(pid)["status"] == "proposed"
+        await bot.handle("admin", f"ANNULER {pid}", "3")  # the admin refuses the plan
+        assert bot.store.plan(pid)["status"] == "cancelled"
+        assert "refusé" in out.texts(OWNER)[-1]
+        assert bot.store.conv(OWNER)["state"] == "cadrage"
+
+    asyncio.run(scenario())

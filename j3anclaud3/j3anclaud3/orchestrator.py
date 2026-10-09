@@ -119,7 +119,11 @@ class J3anClaud3(BaseBot):
         if rec["status"] not in ("proposed", "stopped"):
             await self.out.send_text(user, f"Ce plan est {_STATUS_FR.get(rec['status'], rec['status'])} : rien à valider.")
             return
-        if user == rec["owner"] and not self.s.allow_self_approval:
+        if self.s.approval_by_admin_only and not self.s.is_admin(user):
+            await self.out.send_text(user, "Seul l'administrateur peut lancer la production. Je lui ai transmis la demande 👍")
+            await self._notify_admin(rec, requested_by=user)
+            return
+        if user == rec["owner"] and not self.s.allow_self_approval and not self.s.is_admin(user):
             await self.out.send_text(user, f"La validation doit venir d'un autre membre de l'équipe (**VALIDER {pid} v{rec['version']}**).")
             return
         count = self.store.approve(pid, rec["version"], user) if rec["status"] == "proposed" else self.s.required_approvals
@@ -140,9 +144,20 @@ class J3anClaud3(BaseBot):
         if not rec or rec["status"] not in ("proposed", "approved", "stopped", "delivered"):
             await self.out.send_text(conv["user"], "Rien à annuler.")
             return
+        user = conv["user"]
+        if user != rec["owner"] and not self.s.is_admin(user):
+            await self.out.send_text(user, "Seul l'auteur du plan ou l'administrateur peut l'annuler.")
+            return
         self.store.set_plan_status(pid, rec["version"], "cancelled")
-        conv.update(state="cadrage", plan_id=None)
-        await self.out.send_text(conv["user"], f"❌ Plan {pid} annulé. On repart sur le cadrage quand vous voulez.")
+        if conv["plan_id"] == pid:
+            conv.update(state="cadrage", plan_id=None)
+        if user != rec["owner"]:  # refused by the admin: tell the author
+            owner_conv = self.store.conv(rec["owner"])
+            if owner_conv["plan_id"] == pid:
+                owner_conv.update(state="cadrage", plan_id=None)
+                self.store.save_conv(owner_conv)
+            await self.out.send_text(rec["owner"], f"❌ L'administrateur a refusé le plan {pid}. Vous pouvez reformuler votre besoin.")
+        await self.out.send_text(user, f"❌ Plan {pid} annulé. On repart sur le cadrage quand vous voulez.")
 
     async def _cmd_stop(self, conv, cmd, pid):
         if pid and self.executor.stop(pid):
@@ -252,10 +267,15 @@ class J3anClaud3(BaseBot):
         conv.update(state="validation", plan_id=pid)
 
         text = self.render_plan(pid, version, plan, est)
-        await self.out.send_buttons(
-            user, text,
-            [(f"VALIDER {pid} v{version}", "✅ Valider"), ("MODIFIER", "✏️ Modifier"), (f"ANNULER {pid}", "❌ Annuler")],
-        )
+        if self.s.approval_by_admin_only and not self.s.is_admin(user):
+            text += "\n🔐 La production sera lancée après validation par l'administrateur, qui a reçu ce plan."
+            await self.out.send_buttons(user, text, [("MODIFIER", "✏️ Modifier"), (f"ANNULER {pid}", "❌ Annuler")])
+            await self._notify_admin(self.store.plan(pid, version), requested_by=user)
+        else:
+            await self.out.send_buttons(
+                user, text,
+                [(f"VALIDER {pid} v{version}", "✅ Valider"), ("MODIFIER", "✏️ Modifier"), (f"ANNULER {pid}", "❌ Annuler")],
+            )
 
     def render_plan(self, pid: str, version: int, plan: dict, est: int) -> str:
         """Deterministic French rendering: zero tokens spent on presentation."""
@@ -328,6 +348,15 @@ class J3anClaud3(BaseBot):
                 log.warning("could not notify %s", rec["owner"])
 
     # ---------------------------------------------------------------- helpers
+    async def _notify_admin(self, rec: dict, requested_by: str) -> None:
+        """Put the plan, with its approval button, in the admin's own thread."""
+        admin = self.s.admin_name
+        text = self.render_plan(rec["id"], rec["version"], rec["body"], rec["est_tokens"])
+        await self.out.send_buttons(
+            admin, f"🔔 Validation demandée par **{requested_by}**\n\n{text}",
+            [(f"VALIDER {rec['id']} v{rec['version']}", "✅ Valider"), (f"ANNULER {rec['id']}", "❌ Refuser")],
+        )
+
     async def _broadcast(self, rec: dict, text: str, actor: str) -> None:
         for to in dict.fromkeys([actor, rec["owner"]]):
             await self.out.send_text(to, text)
