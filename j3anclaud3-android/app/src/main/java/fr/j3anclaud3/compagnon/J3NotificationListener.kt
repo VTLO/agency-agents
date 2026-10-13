@@ -54,12 +54,12 @@ internal object Processor {
         if (Messages.isSensitive(newest.text)) return  // codes & security messages never leave the phone
 
         val draft = try {
-            Api(prefs.serverUrl, prefs.token).draftReply(chat, prefs.style)
+            Brain.of(ctx, prefs).draftReply(chat, prefs.style)
+        } catch (e: BrainAuthException) {
+            Notifier.status(ctx, e.message ?: "Connexion refusée : vérifiez les réglages.")
+            return
         } catch (e: Exception) {
             Log.w(TAG, "draft failed: ${e.message}")
-            if (e is ApiException && e.status == 401) {
-                Notifier.status(ctx, "Session J3anClaud3 expirée : reconnectez-vous dans l'application.")
-            }
             return
         }
         if (draft.isBlank()) return  // the server judged that no reply should be sent

@@ -48,6 +48,13 @@
             android:parentActivityName=".MainActivity"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name=".DirectChatActivity"
+            android:exported="false"
+            android:label="@string/chat_title"
+            android:parentActivityName=".MainActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".J3NotificationListener"
             android:exported="true"

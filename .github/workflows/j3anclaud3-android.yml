@@ -25,9 +25,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       # ubuntu-latest ships the Android SDK (ANDROID_HOME); AGP fetches any missing platform itself.
-      - name: Tests (Robolectric) and universal APK
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - name: Tests (Robolectric) and universal APKs, both flavors
+        run: ./gradlew --no-daemon testClaudeDebugUnitTest testLibreDebugUnitTest assembleClaudeDebug assembleLibreDebug
       - uses: actions/upload-artifact@v4
         with:
           name: j3anclaud3-android-apk
-          path: j3anclaud3-android/app/build/outputs/apk/debug/*.apk
+          path: j3anclaud3-android/app/build/outputs/apk/*/debug/*.apk
