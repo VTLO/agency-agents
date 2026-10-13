@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">J3anClaud3</string>
+    <string name="chat_title">Discuter avec J3anClaud3</string>
+    <string name="channel_suggestions">Suggestions de réponse</string>
+    <string name="channel_status">Activité de J3anClaud3</string>
+</resources>
