@@ -1,0 +1,33 @@
+name: J3anClaud3 Android
+
+on:
+  pull_request:
+    paths:
+      - 'j3anclaud3-android/**'
+      - '.github/workflows/j3anclaud3-android.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'j3anclaud3-android/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: j3anclaud3-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Tests (Robolectric) and universal APK
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: j3anclaud3-android-apk
+          path: j3anclaud3-android/app/build/outputs/apk/debug/*.apk

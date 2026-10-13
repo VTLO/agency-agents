@@ -20,11 +20,16 @@ class FakeLLM:
         self.chat_replies: list[dict] = []
         self.plans: list[dict | str] = []
         self.histories: list[list | None] = []
+        self.assist_reply = "Oui, dimanche midi ça marche 🙂"
 
     async def complete(self, tier, system, user, *, max_tokens=None, purpose="", history=None):
         self.calls.append((purpose, tier, system, user))
         self.histories.append(history)
-        if purpose == "conversation":
+        if purpose == "assist":
+            text = self.assist_reply
+        elif purpose == "digest":
+            text = "📌 Maman attend une réponse pour dimanche."
+        elif purpose == "conversation":
             text = f"Réponse {len(self.histories)}"
         elif purpose == "chat":
             text = json.dumps(self.chat_replies.pop(0))

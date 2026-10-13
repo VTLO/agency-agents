@@ -65,7 +65,7 @@ See the [Multi-Tool Integrations](#-multi-tool-integrations) section below for f
 
 ### Option 4: Run the agency from a chat with J3anClaud3
 
-[`j3anclaud3/`](j3anclaud3/README.md) is a self-hosted, French-speaking chatbot (web app, installable on mobile, HTTP API, terminal): the team describes a need, J3anClaud3 proposes a production plan, a human approves it, and token-lean "lite" versions of these agents produce the deliverables. A second mode (`--mode conversation`) turns it into a plain conversational chatbot without the agents.
+[`j3anclaud3/`](j3anclaud3/README.md) is a self-hosted, French-speaking chatbot (web app, installable on mobile, HTTP API, terminal): the team describes a need, J3anClaud3 proposes a production plan, a human approves it, and token-lean "lite" versions of these agents produce the deliverables. A second mode (`--mode conversation`) turns it into a plain conversational chatbot without the agents. A companion Android app ([`j3anclaud3-android/`](j3anclaud3-android/README.md)) brings it into WhatsApp, SMS, Telegram and other messaging apps by reading their notifications and replying through their built-in reply button.
 
 ---
 

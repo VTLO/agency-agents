@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .assist import DigestIn, ReplyIn, digest, draft_reply
 from .base import BaseBot, Outbox
 from .config import MODES, Settings
 from .conversation import Conversation
@@ -192,6 +193,20 @@ def create_app(settings: Settings | None = None, bot: BaseBot | None = None) -> 
         msg_id = f"{user}:{body.id or uuid.uuid4().hex}"
         bot._spawn(bot.handle(user, body.text, msg_id))
         return {"ok": True}
+
+    # --- Android companion -----------------------------------------------------
+    def not_blocked(user: str = Depends(current_user)) -> str:
+        if app.state.bot.store.is_blocked(user):
+            raise HTTPException(403, "accès suspendu par l'administrateur")
+        return user
+
+    @app.post("/api/assist/reply")
+    async def assist_reply(body: ReplyIn, user: str = Depends(not_blocked)):
+        return {"reply": await draft_reply(app.state.bot, user, body)}
+
+    @app.post("/api/assist/digest")
+    async def assist_digest(body: DigestIn, user: str = Depends(not_blocked)):
+        return {"summary": await digest(app.state.bot, user, body)}
 
     @app.get("/api/stream")
     async def stream(request: Request, after: int = 0, user: str = Depends(current_user), out: WebOutbox = Depends(outbox)):

@@ -61,6 +61,7 @@ class Settings:
     chat_tier: str = os.environ.get("J3_CHAT_TIER", "S")  # French dialogue with humans
     plan_tier: str = os.environ.get("J3_PLAN_TIER", "M")  # plan quality matters most
     summary_tier: str = os.environ.get("J3_SUMMARY_TIER", "L")  # FR delivery summary
+    assist_tier: str = os.environ.get("J3_ASSIST_TIER", "L")  # Android companion: replies & digests
     server_fallbacks: bool = os.environ.get("J3_SERVER_FALLBACKS", "1") == "1"
 
     # --- economy knobs ------------------------------------------------------

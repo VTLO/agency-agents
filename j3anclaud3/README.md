@@ -20,6 +20,7 @@ de passe supervise l'ensemble (voir [Administration](#administration)).
 | **Application mobile** | La même page s'installe comme une application (PWA) : « Ajouter à l'écran d'accueil » |
 | **API HTTP** | `POST /api/send`, `GET /api/messages`, flux temps réel `GET /api/stream` — pour scripts, outils internes, autres bots |
 | **Terminal** | `j3anclaud3 chat [--mode conversation]` |
+| **Android** | L'application [`j3anclaud3-android`](../j3anclaud3-android/README.md) : chat intégré, plus suggestions et réponses dans WhatsApp, SMS, Telegram, Signal… via les notifications |
 
 L'historique est stocké côté serveur : avec le même prénom, on retrouve la même conversation sur tous ses appareils.
 
@@ -97,6 +98,20 @@ curl -OJ localhost:8080/api/files/42 -H "$H"            # télécharger un livra
 ```
 
 `id` est optionnel : s'il est fourni, un renvoi du même message n'est traité qu'une fois.
+
+### API du compagnon Android
+
+Utilisées par l'application Android (même jeton `Bearer`), dans les deux modes :
+
+| Endpoint | Rôle |
+|---|---|
+| `POST /api/assist/reply` `{app, chat, group, style, messages:[{from, me, text}]}` | Brouillon de réponse à un message reçu, ou `""` si rien ne doit être envoyé (codes, banque, sujets sensibles, messages automatiques…). |
+| `POST /api/assist/digest` `{items:[{app, chat, from, text, at}]}` | Résumé des messages reçus, ce qui demande une action d'abord. |
+
+Les messages reçus sont des données non fiables : le prompt interdit d'obéir à leur contenu, et
+seuls les 12 derniers messages, de 500 caractères au plus chacun, sont transmis. Ces appels utilisent
+le niveau de modèle `J3_ASSIST_TIER` (`L`, Haiku, par défaut). Les personnes bloquées par l'admin
+reçoivent un refus (403), et la consommation apparaît dans le panneau d'administration.
 
 ## Pourquoi c'est économe en tokens
 
