@@ -19,14 +19,28 @@ import java.io.File
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class ScreenshotTest {
     @Test
-    fun settingsScreen() {
-        val dir = System.getProperty("j3.screenshots")
-        assumeTrue(dir != null)
+    fun settingsScreen() = render("android-settings-${BuildConfig.FLAVOR}-server.png") {
         Prefs(ApplicationProvider.getApplicationContext()).apply {
             privacyAccepted = true
             serverUrl = "https://j3anclaud3.exemple.fr"; name = "guillaume"; token = "t"
             enabledPackages = setOf("com.whatsapp"); seenPackages = setOf("com.whatsapp", "org.telegram.messenger")
         }
+    }
+
+    @Test
+    fun serverlessSettingsScreen() = render("android-settings-${BuildConfig.FLAVOR}-direct.png") {
+        Prefs(ApplicationProvider.getApplicationContext()).apply {
+            privacyAccepted = true
+            backend = Backend.DIRECT
+            provider = Flavor.defaultProvider
+            seenPackages = setOf("com.whatsapp")
+        }
+    }
+
+    private fun render(name: String, setup: () -> Unit) {
+        val dir = System.getProperty("j3.screenshots")
+        assumeTrue(dir != null)
+        setup()
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val root = activity.window.decorView
         val w = 1233
@@ -41,6 +55,6 @@ class ScreenshotTest {
         canvas.drawColor(activity.resources.getColor(R.color.bg, activity.theme))
         content.draw(canvas)
         File(dir!!).mkdirs()
-        File(dir, "android-settings.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, name).outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

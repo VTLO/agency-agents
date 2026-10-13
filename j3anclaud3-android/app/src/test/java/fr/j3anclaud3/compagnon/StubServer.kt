@@ -4,7 +4,10 @@ import java.net.ServerSocket
 import kotlin.concurrent.thread
 
 /** Minimal HTTP/1.1 server (one request per connection), enough to stand in for J3anClaud3. */
-class StubServer(private val handle: (path: String, headers: Map<String, String>, body: String) -> String) {
+class StubServer(
+    private val statusFor: () -> Int = { 200 },
+    private val handle: (path: String, headers: Map<String, String>, body: String) -> String,
+) {
     private val socket = ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
     val port: Int get() = socket.localPort
 
@@ -34,8 +37,9 @@ class StubServer(private val handle: (path: String, headers: Map<String, String>
                     val len = headers["content-length"]?.toIntOrNull() ?: 0
                     val body = ByteArray(len).also { var o = 0; while (o < len) { val r = input.read(it, o, len - o); if (r < 0) break; o += r } }
                     val out = handle(path, headers, body.toString(Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
+                    val code = statusFor()
                     c.getOutputStream().apply {
-                        write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${out.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        write("HTTP/1.1 $code ${if (code == 200) "OK" else "Error"}\r\nContent-Type: application/json\r\nContent-Length: ${out.size}\r\nConnection: close\r\n\r\n".toByteArray())
                         write(out); flush()
                     }
                 }

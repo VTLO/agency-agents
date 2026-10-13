@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     private lateinit var notifStatus: TextView
     private lateinit var connectStatus: TextView
     private lateinit var appsBox: LinearLayout
+    private lateinit var usageLabel: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +57,7 @@ class MainActivity : Activity() {
         super.onResume()
         refreshStatus()
         refreshApps()
+        refreshUsage()
     }
 
     // ------------------------------------------------------------------ layout
@@ -68,7 +70,8 @@ class MainActivity : Activity() {
             box.addView(label(
                 "J3anClaud3 ne lit que les notifications des applications que vous cochez ci-dessous. " +
                     "Pour rédiger une réponse ou un résumé, les derniers messages de la conversation concernée " +
-                    "(12 au plus) sont envoyés à VOTRE serveur J3anClaud3, qui interroge l'IA. " +
+                    "(12 au plus) sont envoyés à l'IA : via VOTRE serveur J3anClaud3, ou directement au fournisseur " +
+                    "choisi (Anthropic, OpenAI, Google, ou votre propre serveur) avec votre clé API. " +
                     "Rien n'est enregistré sur le téléphone ; les codes de vérification et messages de sécurité " +
                     "ne quittent jamais l'appareil. Prévenez vos contacts si l'assistant répond pour vous.",
                 muted = true,
@@ -77,14 +80,20 @@ class MainActivity : Activity() {
             return
         }
 
-        // --- server
-        section("Serveur J3anClaud3")
-        val url = field("Adresse du serveur", prefs.serverUrl, InputType.TYPE_TEXT_VARIATION_URI, "https://j3anclaud3.mon-domaine.fr")
-        val name = field("Votre prénom", prefs.name, InputType.TYPE_TEXT_VARIATION_PERSON_NAME)
-        val password = field("Mot de passe (compte administrateur uniquement)", "", InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        // --- backend
         connectStatus = label("", muted = true)
-        root.addView(button("Se connecter") { connect(url.text.toString(), name.text.toString(), password.text.toString()) })
-        root.addView(connectStatus)
+        if (Flavor.SERVER_AVAILABLE) {
+            section("Fonctionnement")
+            val backends = RadioGroup(this)
+            listOf(
+                Backend.SERVER to "Avec mon serveur J3anClaud3 — administration et suivi centralisés, aucune clé sur le téléphone",
+                Backend.DIRECT to "Sans serveur — ma propre clé API, chiffrée sur ce téléphone",
+            ).forEach { (b, text) ->
+                backends.addView(radio(text, prefs.backend == b) { if (prefs.backend != b) { prefs.backend = b; recreate() } })
+            }
+            root.addView(backends)
+        }
+        if (prefs.backend == Backend.SERVER) buildServer() else buildDirect()
 
         // --- permissions
         section("Autorisations")
@@ -145,10 +154,89 @@ class MainActivity : Activity() {
         // --- actions
         section("J3anClaud3")
         root.addView(button("💬 Discuter avec J3anClaud3") {
-            if (!prefs.isConnected) toast("Connectez-vous d'abord au serveur") else startActivity(Intent(this, ChatActivity::class.java))
+            when {
+                !prefs.isConnected -> toast(NOT_READY)
+                prefs.backend == Backend.DIRECT -> startActivity(Intent(this, DirectChatActivity::class.java))
+                else -> startActivity(Intent(this, ChatActivity::class.java))
+            }
         })
         root.addView(button("📋 Résumé de mes messages") { digest() })
         root.addView(button("🧹 Oublier les messages lus") { Store.clearCaptured(); toast("Messages oubliés") })
+    }
+
+    private fun buildServer() {
+        section("Serveur J3anClaud3")
+        val url = field("Adresse du serveur", prefs.serverUrl, InputType.TYPE_TEXT_VARIATION_URI, "https://j3anclaud3.mon-domaine.fr")
+        val name = field("Votre prénom", prefs.name, InputType.TYPE_TEXT_VARIATION_PERSON_NAME)
+        val password = field("Mot de passe (compte administrateur uniquement)", "", InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        root.addView(button("Se connecter") { connect(url.text.toString(), name.text.toString(), password.text.toString()) })
+        root.addView(connectStatus)
+
+    }
+
+    private fun buildDirect() {
+        section("Fournisseur d'IA")
+        val providers = RadioGroup(this)
+        Flavor.providers.forEach { p ->
+            providers.addView(radio(p.label, prefs.provider == p) { if (prefs.provider != p) { prefs.provider = p; recreate() } })
+        }
+        root.addView(providers)
+
+        val p = prefs.provider
+        text(
+            when (p) {
+                Provider.CLAUDE -> "Clé à créer sur console.anthropic.com (Settings › API Keys)."
+                Provider.OPENAI -> "Clé à créer sur platform.openai.com. Pour un serveur compatible OpenAI (Ollama, " +
+                    "LM Studio, vLLM…), indiquez son adresse, par exemple http://192.168.1.20:11434/v1 ; la clé est alors facultative."
+                Provider.GEMINI -> "Clé à créer sur aistudio.google.com (Get API key)."
+                Provider.CUSTOM -> "Votre serveur reçoit POST /generate/ avec {model, prompt} et répond par du texte " +
+                    "(ou du JSON avec un champ response/text). Clé facultative, envoyée en « Bearer »."
+            } + " La clé est chiffrée par le coffre-fort Android (Keystore). Une connexion Internet ou réseau local reste nécessaire.",
+            13f, muted = true,
+        )
+        val key = field(
+            if (p == Provider.CUSTOM || p == Provider.OPENAI) "Clé API (facultative pour un serveur local)" else "Clé API",
+            "", InputType.TYPE_TEXT_VARIATION_PASSWORD, if (prefs.hasApiKeyFor(p)) "•••• clé enregistrée" else "collez votre clé",
+        )
+        val model = field("Modèle", prefs.modelFor(p), InputType.TYPE_TEXT_VARIATION_URI, p.defaultModel)
+        text("Suggestions : " + p.presets.joinToString(", ") +
+            (if (p != Provider.CLAUDE) " — vérifiez qu'il est toujours proposé par le fournisseur." else ""), 12f, muted = true)
+        val url = if (p != Provider.CLAUDE) field("Adresse de l'API", prefs.urlFor(p), InputType.TYPE_TEXT_VARIATION_URI, p.defaultUrl) else null
+
+        root.addView(button("Enregistrer") {
+            val k = key.text.toString().trim()
+            if (k.isNotEmpty()) prefs.setApiKeyFor(p, k)
+            prefs.setModelFor(p, model.text.toString())
+            url?.let { prefs.setUrlFor(p, it.text.toString()) }
+            key.setText(""); if (prefs.hasApiKeyFor(p)) key.hint = "•••• clé enregistrée"
+            connectStatus.text = "✅ Réglages enregistrés" + (if (k.isNotEmpty()) " (clé chiffrée)." else ".") +
+                (if (url != null && prefs.urlFor(p).startsWith("http://")) "\n⚠️ Adresse non chiffrée : à réserver à votre réseau local." else "")
+        })
+        root.addView(button("Tester") { testKey() })
+        root.addView(button("Effacer la clé") { prefs.setApiKeyFor(p, ""); key.hint = "collez votre clé"; connectStatus.text = "Clé effacée." })
+        root.addView(connectStatus)
+
+        usageLabel = label("", muted = true)
+        root.addView(usageLabel)
+        root.addView(button("Remettre le compteur à zéro") { prefs.resetUsage(); refreshUsage() })
+    }
+
+    private fun testKey() {
+        if (!prefs.isConnected) { connectStatus.text = "Enregistrez d'abord une clé (ou l'adresse d'un serveur local)."; return }
+        connectStatus.text = "Test en cours…"
+        Thread {
+            val r = runCatching { Brain.of(this, prefs).converse(emptyList(), "Réponds seulement : OK") }
+            runOnUiThread {
+                connectStatus.text = r.fold({ "✅ Claude répond : « ${it.take(60)} »" }, { "❌ ${it.message}" })
+                refreshUsage()
+            }
+        }.start()
+    }
+
+    private fun refreshUsage() {
+        if (!::usageLabel.isInitialized) return
+        usageLabel.text = "Consommation sur ce téléphone : %d tokens".format(prefs.usageTokens) +
+            (if (prefs.usageCostUsd > 0) " · ~%.3f \$".format(prefs.usageCostUsd) else "")
     }
 
     // ------------------------------------------------------------------ actions
@@ -172,13 +260,14 @@ class MainActivity : Activity() {
     }
 
     private fun digest() {
-        if (!prefs.isConnected) return toast("Connectez-vous d'abord au serveur")
+        if (!prefs.isConnected) return toast(NOT_READY)
         val items = Store.capturedSnapshot().filterNot { Messages.isSensitive(it.text) }
         if (items.isEmpty()) return toast("Aucun message reçu depuis le démarrage de J3anClaud3")
         toast("Résumé en cours…")
         Thread {
-            val result = runCatching { Api(prefs.serverUrl, prefs.token).digest(items) }
+            val result = runCatching { Brain.of(this, prefs).digest(items) }
             runOnUiThread {
+                refreshUsage()
                 AlertDialog.Builder(this)
                     .setTitle("Résumé de vos messages")
                     .setMessage(result.getOrElse { "Impossible d'obtenir le résumé : ${it.message}" })
@@ -209,7 +298,10 @@ class MainActivity : Activity() {
         val canPost = Build.VERSION.SDK_INT < 33 ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         notifStatus.text = if (canPost) "✅ Les suggestions peuvent s'afficher" else "⚠️ Autorisez l'affichage des suggestions"
-        if (prefs.isConnected && connectStatus.text.isEmpty()) connectStatus.text = "✅ Connecté en tant que ${prefs.name}"
+        if (connectStatus.text.isEmpty() && prefs.isConnected) {
+            connectStatus.text = if (prefs.backend == Backend.SERVER) "✅ Connecté en tant que ${prefs.name}"
+            else "✅ ${prefs.provider.label} · ${prefs.directModel}"
+        }
     }
 
     private fun refreshApps() {
@@ -273,6 +365,14 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
+    private fun radio(s: String, checked: Boolean, onClick: () -> Unit) = RadioButton(this).apply {
+        id = View.generateViewId()
+        text = s
+        isChecked = checked
+        setPadding(dp(4), dp(6), 0, dp(6))
+        setOnClickListener { onClick() }
+    }
+
     private fun check(s: String, value: Boolean, onChange: (Boolean) -> Unit) = CheckBox(this).apply {
         text = s
         isChecked = value
@@ -282,4 +382,8 @@ class MainActivity : Activity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        private const val NOT_READY = "Configurez d'abord le serveur ou votre clé API (section Fonctionnement)"
+    }
 }
